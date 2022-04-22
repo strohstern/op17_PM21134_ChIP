@@ -1,0 +1,166 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+author: "Stephanie Strohbuecker"
+subtitle: Read alignment using the nf-core ChIP seq pipeline
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+We are using the [nf-core ChIP pipeline (version 1.2.2)](https://nf-co.re/chipseq/1.2.2) for aligning the reads from the ChIP experiment.
+
+
+```{r}
+RMD_file_name <- "0-2.read_alignment_nfcore"
+```
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+```{r}
+pkgload::load_all() # load all the functions available in this project
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_ChIP_quantification", sep = "/"))
+```
+The data for the experiment is associated with two sequencing runs:
+
+* 220218_A01366_0146_BH757VDMXY
+* 220325_A01366_0163_AH3CWHDSX3
+
+Note that the second sequencing run data was generated in paired-end mode. However, as the first sequencing run was single-end, we only used the `R1` information as input.
+
+Generate the experimental table input necessary for input into the nf-core ChIP-seq pipeline:
+```{r}
+sample_info <-
+read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
+  rename_with( ~ str_replace_all(., " ", "_")) %>%
+  select(sample_lims, sample_name, replicate, fastq_1) %>%
+  separate(
+    sample_name,
+    into = c("antibody", "genotype"),
+    sep = "_ChIP_",
+    remove = FALSE
+  )  %>%
+  mutate(
+    genotype = str_remove(genotype, "Input_") %>%
+      str_remove("\\d$") %>%
+      str_remove("-.*$"),
+    group = case_when(
+      str_detect(sample_name, "Input") ~ str_c(genotype, antibody, "Input", sep = "_"),
+      !is.na(antibody) ~ str_c(genotype, antibody, sep = "_")
+    ),
+    replicate = str_remove(replicate, "^R"),
+    antibody = case_when(
+      str_detect(sample_name, "Input") ~ NA_character_,
+      TRUE ~ antibody
+    ),
+    control = case_when(
+      !is.na(antibody) ~ str_c(group, "Input", sep = "_"),
+      TRUE ~ NA_character_
+    ),
+    fastq_2 = ""
+  ) %>%
+  select(group, replicate, fastq_1, fastq_2, antibody, control, everything()) %>% 
+  arrange(antibody, group, replicate)
+  
+```
+
+
+
+
+```{r}
+sample_info %>%
+  write_csv(str_c(
+    here("data", "raw_data", "project_docs"),
+    "PM21134_sample_information.csv",
+    sep = "/"
+  ))
+```
+
+
+
+To run read alignment using the CLIP nf-core pipeline, we need to prepare a samplesheet with the following columns:
+
+* group
+* replicate
+* fastq read 1
+* fastq read 2 (if applicable)
+* antibody
+* control
+
+```{r}
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_ChIP", sep = "/"))
+```
+
+
+```{r}
+sample_info %>%
+  select(group, replicate, fastq_1, fastq_2, antibody, control) %>%
+  write_csv(
+    file = str_c(
+      here(),
+      "data",
+      "derived_data",
+      "nfcore_ChIP",
+      "design.csv",
+      sep = "/"
+    ),
+    na = ""
+  )
+```
+
+The results for the nf-core RNA-seq pipeline will be stored here:
+```{r}
+str_c(here(), "data", "derived_data", "nfcore_ChIP", sep = "/")
+```
+
+  
+```{r}
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+```
+
+
+The `custom.config` is empty (increased memory for bwa due to error during the pipeline run)
+```{r}
+write_lines(
+  "process {
+  withName:bwa_align {
+    memory = 64.GB
+  }
+}",
+file = str_c(
+  here(),
+  "data",
+  "derived_data",
+  "nfcore_ChIP",
+  "custom.config",
+  sep = "/"
+)
+)
+```
+
+(Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP`).
+```{r}
+slurm_cmd <-
+  str_c(
+    "sbatch -c 1 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir, "nf_core_ChIP.log", sep = "/"),
+    "--error",
+    str_c(log_dir, "nf_core_ChIP_error.log", sep = "/"),
+    str_c(scripts_dir, "0-2a.Run_nfcore_ChIP.sh", sep = "/"),
+    sep = " "
+  ) 
+
+slurm_cmd
+```
