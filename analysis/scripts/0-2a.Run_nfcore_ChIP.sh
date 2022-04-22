@@ -25,14 +25,15 @@ fi
 
 # Run pipeline
 
-GENOME_DIR=/camp/svc/reference/Genomics/babs/mus_musculus/ensembl/GRCm37/release-75/
+GENOME_DIR=/camp/svc/reference/Genomics/babs/homo_sapiens/ensembl/GRCh37/release-75
 
 nextflow run nf-core/chipseq \
     --input design.csv \
     --broad \
     --macs_gsize 2.7e9 \
     --min_reps_consensus 2 \
-    --fasta $GENOME_DIR/genome/GRCh37.75.dna_sm.primary_assembly.fa \
+    --single_end \
+    --fasta $GENOME_DIR/genome/Homo_sapiens.GRCh37.75.dna_sm.primary_assembly.fa \
     --gtf $GENOME_DIR/gtf/Homo_sapiens.GRCh37.75.gtf \
     --email stephanie.strohbuecker@crick.ac.uk \
     -c custom.config\

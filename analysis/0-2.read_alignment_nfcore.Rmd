@@ -68,7 +68,7 @@ read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
       !is.na(antibody) ~ str_c(group, "Input", sep = "_"),
       TRUE ~ NA_character_
     ),
-    fastq_2 = ""
+    fastq_2 = NA_character_
   ) %>%
   select(group, replicate, fastq_1, fastq_2, antibody, control, everything()) %>% 
   arrange(antibody, group, replicate)
