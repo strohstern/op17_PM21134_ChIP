@@ -1,0 +1,671 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+subtitle: "Analysis of ChIP - QC"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, eval=FALSE, include=FALSE}
+rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/2-1.ChIP_QC.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/2-1.ChIP_QC.html")
+```
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+# Project summary
+
+(taken from the project proposal form)
+    
+"
+
+**Experimental Approach**
+We will perform ChIP experiment on three lines of mouse embryonic fibroblasts. Each line will be isolated from a different genotype: Zfp516 WT, Zfp516 +/- and Zfp516 -/- embryo. We will follow a standard ChIP protocol and use ChIP-grade antibodies. 
+
+Briefly, cells will be crosslinked with 1% formaldehyde for 10 min at room temperature, subsequently the reaction will be quenched with 125mM glycine. Following nuclear extraction, lysates will be sonicated with Covaris machine to obtain DNA fragments between 100-500 bp fragments. 30ug of sonicated chromatin will be incubated with either 5ug anti-LSD1 (ab129195) or 5ug anti-HDAC1 (ab53091) antibody and with Dynabeads A and G overnight at 4C. Samples will be washed with low and high salt buffers and crosslinks will be reversed overnight at 65C. Samples will be treated with Proteinase K and RNAse A, and DNA will be purified using AMPure beads. 
+"
+
+We are analysing the ChIP-seq data using the nextflow [ChIP-seq pipeline](https://nf-co.re/chipseq) available at [nf-core](https://nf-co.re/) using the `--broad` option for MACS to identify broad peaks.
+The pipeline allows to obtain QC metrics, performs alignment and merging of multiple libraries, filtering and alignment QC.
+It further analyses and annotated the obtained peaks.
+
+The following describes the analysis of the full dataset.
+
+```{r}
+RMD_file_name <- "2-1.ChIP_QC"
+```
+
+## Libraries
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(here)
+
+library(ggpubr)
+
+library(plyranges)
+
+library(UpSetR)
+
+library(DESeq2)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+base_dir_macs <- here("data",
+      "derived_data",
+      "nfcore_ChIP",
+      "results",
+      "bwa",
+      "mergedLibrary",
+      "macs")
+
+broad_dir <- str_c(base_dir_macs, "broadPeak", sep = "/")
+narrow_dir <- str_c(base_dir_macs, "narrowPeak", sep = "/")
+
+output_dirs <-
+  str_c(here(),
+        "data/derived_data",
+        c("Tables", "R_objects", "Figures"),
+        RMD_file_name,
+        sep = "/") %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+      generate_directories(.x))
+```
+
+```{r message=FALSE, warning=FALSE}
+meta_data <-
+  read_csv(here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP",
+    "design.csv"
+  )) %>%
+  mutate(sample_name = str_remove(basename(fastq_1), "_.*$")) %>%
+  select(sample_name, group, replicate, antibody, control) %>%
+  mutate(sample_id = str_c(group, "_R", replicate, sep = ""),
+         genotype = str_remove(group, "_.*$")) %>% 
+  distinct()
+
+H3K4me3_consensus_peaks <-
+  read_tsv(
+    here(
+      broad_dir,
+      "consensus",
+      "H3K4me3",
+      "H3K4me3.consensus_peaks.boolean.annotatePeaks.txt"
+    )
+  )
+
+H3K27ac_consensus_peaks <-
+  read_tsv(
+    here(
+      broad_dir,
+      "consensus",
+      "H3K27ac",
+      "H3K27ac.consensus_peaks.boolean.annotatePeaks.txt"
+    )
+  )
+
+ASCL1_consensus_peaks <-
+  read_tsv(
+    here(
+      narrow_dir,
+      "consensus",
+      "ASCL1",
+      "ASCL1.consensus_peaks.boolean.annotatePeaks.txt"
+    )
+  )
+
+
+SMARCC1_consensus_peaks <-
+  read_tsv(
+    here(
+      narrow_dir,
+      "consensus",
+      "SMARCC1",
+      "SMARCC1.consensus_peaks.boolean.annotatePeaks.txt"
+    )
+  )
+```
+
+```{r}
+meta_data %>% 
+  DT::datatable(caption = "Available samples")
+```
+
+
+```{r}
+broad_peaks_files <- list.files(
+  here(
+    broad_dir
+  ),
+  pattern = ".broadPeak",
+  full.names = TRUE
+)
+
+narrow_peaks_files <- list.files(
+  here(
+    narrow_dir
+  ),
+  pattern = ".narrowPeak",
+  full.names = TRUE
+)
+
+```
+
+# Visualisation of ChIP-seq results in IGV
+
+The results of the ChIP-seq can be visualised using the [IGV browser](http://software.broadinstitute.org/software/igv/). An igv session file (`igv_session.xml`) can be found in the `nfcore_ChIP/results/igv/broadPeak` folder. To visualise the data open the IGV browser, go to `File` -> `Open Session` locate the `igv_session.xml` file and open it. To add the genome annotation go to `File` -> `Load from File` and load the `Mus_musculus.GRCh38.95.bed` file located in the `nfcore_ChIP/results/genome` directory.
+
+# QC of ChIP-seq results
+The quality check output from the [ChIP-seq pipeline](https://nf-co.re/chipseq) can be found in the following [MultiQC](https://multiqc.info/) report.
+
+```{r message=FALSE}
+xfun::embed_file(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP",
+    "results",
+    "multiqc",
+    "broadPeak",
+    "multiqc_report.html"
+  ),
+  text = paste("nf-core_ChIPseq_multiqc_report_broadPeaks.html")
+)
+
+xfun::embed_file(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP",
+    "results",
+    "multiqc",
+    "narrowPeak",
+    "multiqc_report.html"
+  ),
+  text = paste("nf-core_ChIPseq_multiqc_report_narrowPeaks.html")
+)
+```
+    
+Overall the sequencing quality is good. However, the background noise across samples is very high, i.e. the signal from the input controls seems to equal that of the samples in which antibodies were used.
+
+We generated Fingerprint plots as described by [deepTools](https://deeptools.readthedocs.io/en/develop/content/tools/plotFingerprint.html). These plots can be used to assess the strength of a ChIP.
+An (ideal) input sample is expected to yield a straight diagonal line, due to a perfect uniform distibution of reads along the genome (with the assumption that there are no enrichments in open chromatin regions). A specific and strong ChIP enrichment should result in the majority of reads located to few bins, which results in a steep rise of the cumulative sum towards the highest rank.
+
+```{r, fig.height=8, message=FALSE, warning=FALSE}
+read_tsv(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP",
+    "results",
+    "bwa",
+    "mergedLibrary",
+    "deepTools",
+    "plotFingerprint",
+    "deeptools_fingerprint_plot.tsv"
+  )
+) %>%
+  pivot_longer(-rank, names_to = "sample_id", values_to = "fraction") %>%
+  filter(!is.na(fraction)) %>%
+  left_join(meta_data) %>%
+  # filter(!is.na(antibody)) %>%
+  mutate(antibody = case_when(is.na(antibody) ~ group,
+                              TRUE ~ antibody),
+         grouping = str_remove(group, "_Input")) %>% 
+  group_by(grouping) %>% 
+  group_split() %>% 
+  map(~{ .x %>% 
+  ggplot(aes(x = rank, y = fraction)) +
+  geom_abline(intercept = 0,
+              slope = 1,
+              colour = "grey67") +
+  geom_line(aes(colour = sample_id))  + 
+  guides(col = guide_legend(ncol = 2)) +
+  labs(title = "Fingerprint plot for ChIP samples", x = "rank", y = "fraction w.r.t. bin with highest coverage") #+
+  # facet_grid(rows = vars(genotype), cols = vars(antibody))
+    })
+```
+
+Another way to look at the enrichment of binding along genes are [profile plots](https://deeptools.readthedocs.io/en/develop/content/tools/plotProfile.html). These plots visualise scores over sets of genomic regions, i.e. genes. 
+
+```{r, fig.height=8, message=FALSE, warning=FALSE}
+read_tsv(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP",
+    "results",
+    "bwa",
+    "mergedLibrary",
+    "deepTools",
+    "plotProfile",
+    "read_distribution_profile.tsv"
+  )
+) %>%
+  pivot_longer(-Category, names_to = "sample_id", values_to = "occurence") %>%
+  left_join(meta_data) %>%
+  mutate(antibody = case_when(
+    is.na(antibody) ~ group,
+    TRUE ~ antibody
+  ),
+  grouping = str_remove(group, "_Input")) %>% 
+    group_by(grouping) %>% 
+  group_split() %>% 
+   map(~{ .x %>% 
+  ggplot(aes(x = Category, y = occurence)) +
+  geom_vline(xintercept = c(-3000, 0, 1000, 4000), colour = "grey77") +
+  geom_line(aes(colour = sample_id))+
+  labs(title = "Profile plot for ChIP samples", x = "", y = "Occurence") +
+  facet_grid(rows = vars(genotype), cols = vars(antibody)) +
+  guides(col = guide_legend(ncol = 2)) +
+  scale_x_continuous(
+    breaks = c(-3000, 0, 1000, 4000),
+    labels = c(
+      "-3000" = "-3.0Kb",
+      "0" = "TSS",
+      "1000" = "TES",
+      "4000" = "4Kb"
+    ))})
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+# columns in narrowPeak file: name, integer score for display (UCSC ENCODE narrowPeak format), fold-change at peak summit, -log10pvalue at peak summit, -log10qvalue at peak summit, relative summit position to peak start
+broad_macs_peaks <-
+  map(broad_peaks_files, ~ {
+    read_tsv(
+      .x,
+      col_names = c(
+        "seqnames",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "foldchange",
+        "-log10pvalue",
+        "-log10qvalue"
+      )
+    ) %>%
+      mutate(strand = case_when(strand == "." ~ "*",
+                                TRUE ~ strand)) %>%
+      as_granges()
+  }) %>%
+  set_names(basename(broad_peaks_files) %>%
+              str_remove("_peaks.broadPeak"))
+
+broad_macs_peaks <- keep(broad_macs_peaks, !str_detect(names(broad_macs_peaks), "ASCL1|SMARCC1"))
+```
+
+
+```{r message=FALSE, warning=FALSE}
+# columns in narrowPeak file: name, integer score for display (UCSC ENCODE narrowPeak format), fold-change at peak summit, -log10pvalue at peak summit, -log10qvalue at peak summit, relative summit position to peak start
+narrow_macs_peaks <-
+  map(narrow_peaks_files, ~ {
+    read_tsv(
+      .x,
+      col_names = c(
+        "seqnames",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "foldchange",
+        "-log10pvalue",
+        "-log10qvalue"
+      )
+    ) %>%
+      mutate(strand = case_when(strand == "." ~ "*",
+                                TRUE ~ strand)) %>%
+      as_granges()
+  }) %>%
+  set_names(basename(narrow_peaks_files) %>%
+              str_remove("_peaks.narrowPeak"))
+
+
+narrow_macs_peaks <- keep(narrow_macs_peaks, str_detect(names(narrow_macs_peaks), "ASCL1|SMARCC1"))
+```
+
+```{r}
+map_df(broad_macs_peaks, ~ length(.x)) %>%
+  pivot_longer(cols = everything(), names_to = "sample_id", values_to = "nb_peaks") %>%
+  left_join(meta_data, by = "sample_id") %>%
+  ggplot(aes(x = genotype, y = nb_peaks)) +
+  geom_boxplot() +
+  labs(title = "Number of detected peaks in each sample", x = "", y = "Number of peaks") + 
+  facet_grid(cols = vars(antibody))
+
+map_df(narrow_macs_peaks, ~ length(.x)) %>%
+  pivot_longer(cols = everything(), names_to = "sample_id", values_to = "nb_peaks") %>%
+  left_join(meta_data, by = "sample_id") %>%
+  ggplot(aes(x = genotype, y = nb_peaks)) +
+  geom_boxplot() +
+  labs(title = "Number of detected peaks in each sample", x = "", y = "Number of peaks") + 
+  facet_grid(cols = vars(antibody))
+```
+The number of detected consensus peaks. The consensus peak set only includes those peaks that were detected in at least 2 replicates.
+
+With this approach we identified `r NROW(ASCL1_consensus_peaks)` with the ASCL1 antibody and `r NROW(SMARCC1_consensus_peaks)` with the SMARCC1 antibody (narrow peaks).
+With this approach we identified `r NROW(H3K4me3_consensus_peaks)` with the H3K4me3 antibody and `r NROW(H3K27ac_consensus_peaks)` with the H3K27ac antibody. 
+
+#### {.tabset .tabset-fade .tabset-pills}
+
+##### ASCL1 antibody
+
+```{r fig.height=8, message=FALSE, warning=FALSE}
+ASCL1_consensus_peaks %>% 
+  mutate(peak_id = str_c(chr, start, end, interval_id)) %>% 
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>% 
+  as.data.frame() %>% 
+  upset(sets = (ASCL1_consensus_peaks %>% dplyr::select(contains("bool")) %>% colnames()), order.by = "freq", keep.order = TRUE)
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+
+##### SMARCC1 antibody
+
+```{r fig.height=8, message=FALSE, warning=FALSE}
+SMARCC1_consensus_peaks %>% 
+  mutate(peak_id = str_c(chr, start, end, interval_id)) %>% 
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>% 
+  as.data.frame() %>% 
+  upset(sets = (SMARCC1_consensus_peaks %>% dplyr::select(contains("bool")) %>% colnames()), order.by = "freq", keep.order = TRUE)
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+
+##### H3K4me3 antibody
+
+```{r fig.height=8, message=FALSE, warning=FALSE}
+H3K4me3_consensus_peaks %>% 
+  mutate(peak_id = str_c(chr, start, end, interval_id)) %>% 
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>% 
+  as.data.frame() %>% 
+  upset(sets = (H3K4me3_consensus_peaks %>% dplyr::select(contains("bool")) %>% colnames()), order.by = "freq", keep.order = TRUE)
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+
+##### H3K27ac antibody
+
+```{r fig.height=8, message=FALSE, warning=FALSE}
+H3K27ac_consensus_peaks %>% 
+  mutate(peak_id = str_c(chr, start, end, interval_id)) %>% 
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>% 
+  as.data.frame() %>% 
+  upset(sets = (H3K27ac_consensus_peaks %>% dplyr::select(contains("bool")) %>% colnames()), order.by = "freq", keep.order = TRUE)
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+```{r}
+until here chunks are fine
+```
+
+#### {-}
+
+## Peak annotation
+
+The annotation of the total peaks relative to genomic features was performed using HOMER with the following definitions:
+
+* promoter-TSS: by default defined from -1kb to +100bp
+* TTS: by default defined from -100 bp to +1kb
+
+```{r, fig.height=8, message=FALSE, warning=FALSE}
+read_delim(here(base_dir_macs, "qc", "macs_annotatePeaks.summary.txt")) %>%
+  pivot_longer(cols = !sample,
+               names_to = "annotation",
+               values_to = "peak_count") %>%
+  mutate(antibody = str_extract(sample, "LSD1|HDAC1")) %>% 
+  # filter(sample != "Zfp516_HET_HDAC1_R2") %>% 
+  ggplot(aes(
+    fill = factor(
+      annotation,
+      levels = c(
+        "Unassigned",
+        "exon",
+        "TTS",
+        "promoter-TSS",
+        "intron",
+        "Intergenic"
+      )
+    ),
+    x = sample,
+    y = peak_count
+  )) +
+  geom_bar(position = "stack", stat = "identity") +
+  xlab("ChIP samples") +
+  ylab("Peak count") +
+  labs(fill = "Genomic features") +
+  ggtitle("Total peaks") +
+  scale_x_discrete(guide = guide_axis(angle = 90))+ 
+  facet_grid(cols = vars(antibody))
+```
+
+The majority of peaks seem to fall into intergenic and intronic regions.
+
+#### {.tabset .tabset-fade .tabset-pills}
+
+##### HDAC1 Chip analysis
+
+```{r message=FALSE, warning=FALSE, fig.height=6}
+raw_counts_HDAC1 <-
+  read_tsv(
+    here(
+      base_dir_macs,
+      "consensus",
+      "HDAC1",
+      "HDAC1.consensus_peaks.featureCounts.txt"
+    ),
+    skip = 1
+  ) %>%
+  rename_with( ~ str_remove(., ".mLb.clN.bam")) %>%
+  mutate(interval_id = str_c(Geneid, Chr, Start, End, Strand, sep = "_")) %>%
+  select(interval_id, starts_with("Zfp516")) %>%
+   column_to_rownames(var = "interval_id")
+
+meta_data_HDAC1 <- meta_data %>%
+  relocate(sample_id) %>%
+  mutate(across(group:genotype, ~ as_factor(.))) %>%
+  column_to_rownames(var = "sample_id")
+
+
+# DESeq object
+dds_peaks_HDAC1 <- DESeqDataSetFromMatrix(countData = raw_counts_HDAC1,
+                                    colData = meta_data_HDAC1[colnames(raw_counts_HDAC1),],
+                                    design = ~ genotype)
+
+# normalized peak counts
+dds_peaks_HDAC1 <-  estimateSizeFactors(dds_peaks_HDAC1)
+
+rlog_peaks_HDAC1 <- rlog(dds_peaks_HDAC1)
+plotPCA(rlog_peaks_HDAC1, intgroup = c("genotype", "replicate"))  +
+  guides(col = guide_legend(ncol = 2)) +
+  ggtitle("PCA plot of reads in consensus peaks for HDAC1")
+```
+
+##### LSD1 Chip analysis
+
+```{r message=FALSE, warning=FALSE, fig.height=6}
+raw_counts_LSD1 <-
+  read_tsv(
+    here(
+      base_dir_macs,
+      "consensus",
+      "LSD1",
+      "LSD1.consensus_peaks.featureCounts.txt"
+    ),
+    skip = 1
+  ) %>%
+  rename_with( ~ str_remove(., ".mLb.clN.bam")) %>%
+  mutate(interval_id = str_c(Geneid, Chr, Start, End, Strand, sep = "_")) %>%
+  select(interval_id, starts_with("Zfp516")) %>%
+   column_to_rownames(var = "interval_id")
+
+meta_data_LSD1 <- meta_data %>%
+  relocate(sample_id) %>%
+  mutate(across(group:genotype, ~ as_factor(.))) %>%
+  column_to_rownames(var = "sample_id")
+
+
+# DESeq object
+dds_peaks_LSD1 <- DESeqDataSetFromMatrix(countData = raw_counts_LSD1,
+                                    colData = meta_data_LSD1[colnames(raw_counts_LSD1),],
+                                    design = ~ group)
+
+# normalized peak counts
+dds_peaks_LSD1 <-  estimateSizeFactors(dds_peaks_LSD1)
+
+rlog_peaks_LSD1 <- rlog(dds_peaks_LSD1)
+plotPCA(rlog_peaks_LSD1, intgroup = c("genotype", "replicate"))  +
+  guides(col = guide_legend(ncol = 2)) +
+  ggtitle("PCA plot of reads in consensus peaks for LSD1")
+```
+
+#### {-}
+
+# Identify overlapping consensus peaks for HDAC1 and LSD1
+
+```{r}
+HDAC1_grs <- HDAC1_consensus_peaks %>%
+  select(
+    seqnames = chr,
+    start,
+    end,
+    interval_id,
+    num_peaks,
+    num_samples,
+    # contains("WT"),
+    Annotation,
+    `Detailed Annotation`,
+    `Distance to TSS`,
+    `Nearest PromoterID`,
+    `Entrez ID`,
+    `Gene Name`,
+    `Gene Type`
+  ) %>% 
+  as_granges()
+```
+
+```{r}
+LSD1_grs <- LSD1_consensus_peaks %>%
+  select(
+    seqnames = chr,
+    start,
+    end,
+    interval_id,
+    num_peaks,
+    num_samples,
+    # contains("WT"),
+    Annotation,
+    `Detailed Annotation`,
+    `Distance to TSS`,
+    `Nearest PromoterID`,
+    `Entrez ID`,
+    `Gene Name`,
+    `Gene Type`
+  ) %>% 
+  as_granges()
+```
+
+```{r}
+# LSD1_grs %>% 
+#   as_tibble() %>% 
+#   ggplot(aes(width)) +
+#   geom_density() +
+#   geom_vline(xintercept = median(LSD1_grs %>% as_tibble() %>% pull(width)))
+# 
+# HDAC1_grs %>% 
+#   as_tibble() %>% 
+#   ggplot(aes(width)) +
+#   geom_density() +
+#   geom_vline(xintercept = median(HDAC1_grs %>% as_tibble() %>% pull(width)))
+
+
+## The peak width is quite wide indicating to high background noise
+```
+
+We find peaks that overlap between the identified consensus peaks with LSD1 and HDAC1.
+
+```{r}
+overlap_peaks <- join_overlap_intersect(LSD1_grs,
+                       HDAC1_grs,
+                       suffix = c(".LSD1", ".HDAC1"),
+                       minoverlap = 1) %>%
+  as_tibble() %>%
+  select(
+    chr = seqnames,
+    start,
+    end,
+    width,
+    strand,
+    starts_with("Gene"),
+    starts_with("Annotation."),
+    starts_with("Distance"),
+    starts_with("Nearest")
+  ) 
+
+overlap_peaks %>% 
+  DT::datatable(caption = "Consensus peaks overlapping between LSD1 and HDAC1 peaks")
+```
+
+
+
+
+An excel file with all the peaks can be downloaded from the following link:
+
+```{r}
+openxlsx::write.xlsx(
+  list(
+    "HDAC1_consensus_peaks_full_info" = HDAC1_consensus_peaks %>%
+      mutate(peak_id = str_c(chr, ":", start, "-", end, sep = "")) %>% 
+      relocate(peak_id),
+    "LSD1_consensus_peaks_full_info" = LSD1_consensus_peaks %>%
+      mutate(peak_id = str_c(chr, ":", start, "-", end, sep = "")) %>% 
+      relocate(peak_id),
+    "overlapping_consensus_peaks" = overlap_peaks %>%
+      mutate(peak_id = str_c(chr, ":", start, "-", end, sep = "")) %>% 
+      relocate(peak_id)
+  ),
+  file = str_c(output_dirs["Tables"],
+               "Consensus_peak_information.xlsx",
+               sep = "/"),
+  overwrite = TRUE
+)
+```
+
+```{r}
+excel_files_path <-
+  list.files(output_dirs["Tables"], full.names = TRUE) %>%
+  set_names(basename(.))
+```
+
+```{r, results="asis"}
+xfun::pkg_load2(c('base64enc', 'htmltools', 'mime'))
+
+imap(excel_files_path, function(file_path, file_text) {
+  xfun::embed_file(file_path,
+                   text = file_text)
+})
+```
+
+
