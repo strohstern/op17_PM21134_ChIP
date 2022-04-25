@@ -30,7 +30,6 @@ library(here)
 
 ```{r}
 pkgload::load_all() # load all the functions available in this project
-generate_directories(str_c(here(), "data", "derived_data", "nfcore_ChIP_quantification", sep = "/"))
 ```
 The data for the experiment is associated with two sequencing runs:
 
@@ -151,6 +150,8 @@ file = str_c(
 ```
 
 (Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP`).
+
+Note we ran the pipeline twice once with `--broad` and once with `--narrow_peak` option (note that using `-resume` avoids running the whole pipeline).
 ```{r}
 slurm_cmd <-
   str_c(

@@ -29,7 +29,7 @@ GENOME_DIR=/camp/svc/reference/Genomics/babs/homo_sapiens/ensembl/GRCh37/release
 
 nextflow run nf-core/chipseq \
     --input design.csv \
-    --broad \
+    --narrow_peak \
     --macs_gsize 2.7e9 \
     --min_reps_consensus 2 \
     --single_end \
