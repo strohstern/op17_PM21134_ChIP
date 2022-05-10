@@ -24,12 +24,12 @@ if [ ! -d "$NXF_WORK" ]; then
 fi
 
 # Run pipeline
+    #--narrow_peak \
 
 GENOME_DIR=/camp/svc/reference/Genomics/babs/homo_sapiens/ensembl/GRCh37/release-75
 
 nextflow run nf-core/chipseq \
     --input design.csv \
-    --narrow_peak \
     --macs_gsize 2.7e9 \
     --min_reps_consensus 2 \
     --single_end \

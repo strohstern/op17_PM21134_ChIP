@@ -41,8 +41,8 @@ Note that the second sequencing run data was generated in paired-end mode. Howev
 Generate the experimental table input necessary for input into the nf-core ChIP-seq pipeline:
 ```{r}
 sample_info <-
-read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
-  rename_with( ~ str_replace_all(., " ", "_")) %>%
+  read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
+  rename_with(~ str_replace_all(., " ", "_")) %>%
   select(sample_lims, sample_name, replicate, fastq_1) %>%
   separate(
     sample_name,
@@ -55,8 +55,7 @@ read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
       str_remove("\\d$") %>%
       str_remove("-.*$"),
     group = case_when(
-      str_detect(sample_name, "Input") ~ str_c(genotype, antibody, "Input", sep = "_"),
-      !is.na(antibody) ~ str_c(genotype, antibody, sep = "_")
+      str_detect(sample_name, "Input") ~ str_c(genotype, antibody, "Input", sep = "_"),!is.na(antibody) ~ str_c(genotype, antibody, sep = "_")
     ),
     replicate = str_remove(replicate, "^R"),
     antibody = case_when(
@@ -69,12 +68,80 @@ read_csv(here("data", "raw_data", "project_docs", "PM21134_design.csv")) %>%
     ),
     fastq_2 = NA_character_
   ) %>%
-  select(group, replicate, fastq_1, fastq_2, antibody, control, everything()) %>% 
+  select(group,
+         replicate,
+         fastq_1,
+         fastq_2,
+         antibody,
+         control,
+         everything()) %>%
   arrange(antibody, group, replicate)
-  
+
 ```
 
+Note that the ChIP for SMARCA1 failed. Therefore Oana Paun would like to use an older ChIP for SMARCB1 that was run previously as part of the following project/ run:
 
+* DN19154/ 190924_K00102_0399_BHCFW3BBXY
+
+```{r}
+DN19154_sample_info <- readxl::read_excel(
+  here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "SMARCB1_ChIP_replacment_info_vs09-05-2022.xlsx"
+  ),
+  skip = 1
+) %>%
+  select(sample_lims = `Sample limsid`, sample_name = `Sample Name`) %>%
+  arrange(sample_name) %>%
+  mutate(
+    group = str_remove(sample_name, "1percent_") %>%
+      str_remove("ChIP_") %>%
+      str_remove("_$") %>%
+      str_remove("_K4.*$|_C1.*$") %>%
+      str_remove("ASCL1_")
+  ) %>%
+  group_by(group) %>%
+  mutate(replicate = row_number() %>% as.character()) %>%
+  ungroup() %>%
+  separate(group, into = c("antibody", "genotype")) %>%
+  mutate(
+    genotype = str_replace(genotype, "KO", "ASCL1_KO"),
+    group = str_c(antibody, genotype, sep = "_"),
+    fastq_2 = NA_character_,
+    antibody = case_when(
+      str_detect(sample_name, "INPUT") ~ NA_character_,
+      TRUE ~ antibody
+    ),
+    control = case_when(
+      !is.na(antibody) ~ str_c("INPUT", genotype, sep = "_"),
+      TRUE ~ NA_character_
+    )
+  )
+
+sample_info <- read_csv(here("data",
+              "raw_data",
+              "project_docs", "DN19154_design.csv")) %>%
+  select(fastq_1) %>%
+  mutate(sample_lims = basename(fastq_1) %>%
+           str_remove("_.*$")) %>%
+  inner_join(DN19154_sample_info, by = "sample_lims") %>%
+  # select(sample_name) %>% distinct() %>%
+  arrange(group, replicate) %>%
+  select(
+    group,
+    replicate,
+    fastq_1,
+    fastq_2,
+    antibody,
+    control,
+    sample_lims,
+    sample_name,
+    genotype
+  ) %>% 
+  bind_rows(sample_info)
+```
 
 
 ```{r}
@@ -86,9 +153,7 @@ sample_info %>%
   ))
 ```
 
-
-
-To run read alignment using the CLIP nf-core pipeline, we need to prepare a samplesheet with the following columns:
+To run read alignment using the ChIP nf-core pipeline, we need to prepare a samplesheet with the following columns:
 
 * group
 * replicate
