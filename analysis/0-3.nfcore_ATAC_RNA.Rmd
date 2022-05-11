@@ -1,0 +1,236 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+author: "Stephanie Strohbuecker"
+subtitle: Read alignment using the nf-core ATAC- and RNA-seq pipelines
+output:
+  html_document:
+    df_print: paged
+---
+
+Oana Paun asked to run the ABC algorithm to identify target genes for enhancers using the [ABC algorithm](https://github.com/broadinstitute/ABC-Enhancer-Gene-Prediction).
+The ABC algorithm requires information about open chromatin (ATAC-data), H3K27ac ChIP-seq and, where possible gene expression data (RNA-seq data).
+Oana Paun specified the following appropriate (matching datasets):
+
+* RNA-seq: RN19275
+    - run: 200128_K00102_0451_BHGHN3BBXY
+* ATAC-seq: PM19276
+    - run: 200120_K00102_0447_AHFVFTBBXY
+* H3K27ac ChIP: this project
+    
+For the RNA- and ATAC-seq datasets only the samples for the NRS_WT genotype (day 24) should be used.
+We therefore re-analysed the two sequencing modalities using only the raw data for this genotype.
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+We are using the [nf-core ATACseq pipeline (version 1.2.1)](https://nf-co.re/atacseq/1.2.1) for aligning the reads from the ATAC-seq experiment and the [nf-core RNAseq pipeline (version 3.7)](https://nf-co.re/rnaseq/3.7) for aligning the RNA-seq reads.
+
+
+```{r}
+RMD_file_name <- "0-3.nfcore_ATAC_RNA"
+```
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+```{r}
+pkgload::load_all() # load all the functions available in this project
+```
+
+```{r}
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+```
+
+```{bash, eval=FALSE}
+cp /camp/stp/babs/inputs/sequencing/data/guillemotf/oana.paun/RN19275/RN19275_design.csv ../data/raw_data/project_docs/RNAseq_RN19275_design.csv
+```
+
+```{bash, eval=FALSE}
+cp /camp/stp/babs/inputs/sequencing/data/guillemotf/oana.paun/PM19276/PM19276_design.csv ../data/raw_data/project_docs/ATACseq_PM19276_design.csv
+
+cp /camp/stp/babs/working/patelh/projects/guillemotf/oana.paun/011_ATACSeq_E4/design.csv ../data/raw_data/project_docs/PM19276_011_ATACSeq_E4_design.csv
+```
+
+
+## RNA-seq
+
+```{r}
+RNA_sample_info <-
+  readxl::read_xlsx(
+    here(
+      "data",
+      "raw_data",
+      "project_docs",
+      "RN19275_006_RNASeq_E5_sampleCounts.xlsx"
+    )
+  ) %>%
+  select(Prefix, sample = NGS) %>%
+  filter(str_detect(Prefix, "NRS_WT")) %>%
+  separate(Prefix,
+           into = c("genotype", "replicate"),
+           sep = "_R")
+
+RNA_sample_info <-
+  read_csv(here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "RNAseq_RN19275_design.csv"
+  )) %>%
+  select(sample, fastq_1 = file) %>%
+  right_join(RNA_sample_info) %>%
+  mutate(fastq_2 = NA_character_,
+         strandedness = "reverse") %>%
+  relocate(any_of(c("genotype", "replicate")), .after = last_col())
+```
+
+To run read alignment using the ATAC nf-core pipeline, we need to prepare a samplesheet with the following columns:
+
+* sample
+* fastq read 1
+* fastq read 2 
+* strandedness
+
+```{r}
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_RNA", sep = "/"))
+```
+
+```{r}
+RNA_sample_info %>%
+  write_csv(
+    file = str_c(
+      here(),
+      "data",
+      "derived_data",
+      "nfcore_RNA",
+      "design.csv",
+      sep = "/"
+    ),
+    na = ""
+  )
+```
+
+The results for the nf-core RNA-seq pipeline will be stored here:
+```{r}
+str_c(here(), "data", "derived_data", "nfcore_RNA", sep = "/")
+```
+
+The `custom.config` is empty 
+```{r}
+write_lines(
+  "",
+file = str_c(
+  here(),
+  "data",
+  "derived_data",
+  "nfcore_RNA",
+  "custom.config",
+  sep = "/"
+)
+)
+```
+
+(Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA`).
+
+```{r}
+slurm_cmd <-
+  str_c(
+    "sbatch -c 1 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir, "nf_core_RNA.log", sep = "/"),
+    "--error",
+    str_c(log_dir, "nf_core_RNA_error.log", sep = "/"),
+    str_c(scripts_dir, "0-3a.Run_nfcore_RNA.sh", sep = "/"),
+    sep = " "
+  ) 
+
+slurm_cmd
+```
+
+
+## ATAC
+
+```{r}
+ATAC_sample_info <-read_csv(
+    here(
+      "data",
+      "raw_data",
+      "project_docs",
+      "PM19276_011_ATACSeq_E4_design.csv"
+    )
+  ) %>% 
+  filter(group == "NRS_WT")
+```
+
+
+To run read alignment using the ATAC nf-core pipeline, we need to prepare a samplesheet with the following columns:
+
+* group
+* replicate
+* fastq read 1
+* fastq read 2 
+
+```{r}
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_ATAC", sep = "/"))
+```
+
+
+```{r}
+ATAC_sample_info %>%
+  write_csv(
+    file = str_c(
+      here(),
+      "data",
+      "derived_data",
+      "nfcore_ATAC",
+      "design.csv",
+      sep = "/"
+    ),
+    na = ""
+  )
+```
+
+The results for the nf-core RNA-seq pipeline will be stored here:
+```{r}
+str_c(here(), "data", "derived_data", "nfcore_ATAC", sep = "/")
+```
+
+
+The `custom.config` is empty 
+```{r}
+write_lines(
+  "",
+file = str_c(
+  here(),
+  "data",
+  "derived_data",
+  "nfcore_ATAC",
+  "custom.config",
+  sep = "/"
+)
+)
+```
+
+(Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC`).
+
+Note we ran the pipeline twice once with `--broad` and once with `--narrow_peak` option (note that using `-resume` avoids running the whole pipeline).
+```{r}
+slurm_cmd <-
+  str_c(
+    "sbatch -c 1 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir, "nf_core_ATAC.log", sep = "/"),
+    "--error",
+    str_c(log_dir, "nf_core_ATAC_error.log", sep = "/"),
+    str_c(scripts_dir, "0-3b.Run_nfcore_ATAC.sh", sep = "/"),
+    sep = " "
+  ) 
+
+slurm_cmd
+```
