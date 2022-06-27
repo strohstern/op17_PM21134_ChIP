@@ -15,6 +15,8 @@ Oana Paun specified the following appropriate (matching datasets):
     - run: 200128_K00102_0451_BHGHN3BBXY
 * ATAC-seq: PM19276
     - run: 200120_K00102_0447_AHFVFTBBXY
+* ATAC-seq: PM21132
+    - run: 210723_A01366_0037_BH2NLTDMXY
 * H3K27ac ChIP: this project
     
 For the RNA- and ATAC-seq datasets only the samples for the NRS_WT genotype (day 24) should be used.
@@ -57,6 +59,8 @@ cp /camp/stp/babs/inputs/sequencing/data/guillemotf/oana.paun/RN19275/RN19275_de
 cp /camp/stp/babs/inputs/sequencing/data/guillemotf/oana.paun/PM19276/PM19276_design.csv ../data/raw_data/project_docs/ATACseq_PM19276_design.csv
 
 cp /camp/stp/babs/working/patelh/projects/guillemotf/oana.paun/011_ATACSeq_E4/design.csv ../data/raw_data/project_docs/PM19276_011_ATACSeq_E4_design.csv
+
+cp /camp/stp/babs/inputs/sequencing/data/guillemotf/oana.paun/PM21132/PM21132_design.csv ../data/raw_data/project_docs/PM21132_design.csv
 ```
 
 
@@ -166,7 +170,25 @@ ATAC_sample_info <-read_csv(
       "PM19276_011_ATACSeq_E4_design.csv"
     )
   ) %>% 
-  filter(group == "NRS_WT")
+  filter(group == "NRS_WT") %>% 
+  mutate(sample_name = str_c("PM19276", group, replicate, sep = "_"),
+         species = "Homo sapiens")
+```
+
+```{r}
+ATAC_sample_info2 <-
+  read_csv(here("data",
+                "raw_data",
+                "project_docs",
+                "PM21132_design.csv")) %>%
+  filter(group == "WT") %>%
+  mutate(replicate = str_extract(sample_name, "R\\d") %>%
+           str_remove("R") %>% 
+           as.numeric())
+```
+
+```{r}
+ATAC_sample_info <- bind_rows(ATAC_sample_info, ATAC_sample_info2)
 ```
 
 
