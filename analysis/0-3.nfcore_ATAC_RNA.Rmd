@@ -205,7 +205,9 @@ generate_directories(str_c(here(), "data", "derived_data", "nfcore_ATAC", sep = 
 
 
 ```{r}
-ATAC_sample_info %>%
+# fastq for PM19276 already archived
+ATAC_sample_info2 %>%
+  select(group, replicate, contains("fastq")) %>% 
   write_csv(
     file = str_c(
       here(),
