@@ -11,7 +11,7 @@ output:
 rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/2-1.ChIP_QC.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/2-1.ChIP_QC.html")
 ```
 
-The following descrives the usage of the [ABC algorithm](https://github.com/broadinstitute/ABC-Enhancer-Gene-Prediction) to identify enhancer-gene relationsships. This scripts generates the TSS annotation based on the expression detected in the RNA-seq (RN19275) and the information provided in the supplementary data of the [paper](https://pubmed.ncbi.nlm.nih.gov/31784727/).
+The following describes the usage of the [ABC algorithm](https://github.com/broadinstitute/ABC-Enhancer-Gene-Prediction) to identify enhancer-gene relationships. This scripts generates the TSS annotation based on the expression detected in the RNA-seq (RN19275) and the information provided in the supplementary data of the [paper](https://pubmed.ncbi.nlm.nih.gov/31784727/).
 
 ```{r global_options, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE,
@@ -395,8 +395,8 @@ read_tsv(
   col_names = FALSE
 ) %>% 
   select(chrom_name = X1, chrom_size = X2) %>% 
-  filter(chrom_name %in% unique(gene_bounds$seqnames)) %>% 
-  arrange(as.numeric(chrom_name)) %>% 
+  # filter(chrom_name %in% unique(gene_bounds$seqnames)) %>% 
+  # arrange(as.numeric(chrom_name)) %>% 
   mutate(chr_start = 0) %>% 
   relocate(chr_start, .after = chrom_name) %>% 
   write_tsv(  str_c(
@@ -413,6 +413,9 @@ module purge
 module load BEDTools/2.29.2-GCC-9.3.0
 
 bedtools sort -i Homo_sapiens.GRCh37.75.chr_sizes.bed > Homo_sapiens.GRCh37.75.chr_sizes.sort.bed
+
+# the name change is neccessary due to the naming assumptions in the ABC algorithm
+Homo_sapiens.GRCh37.75.chr_sizes.sort.bed > Homo_sapiens.GRCh37.75.chr_sizes.bed
 ```
 
 ```{r}
