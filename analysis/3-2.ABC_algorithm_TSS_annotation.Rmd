@@ -330,15 +330,15 @@ tss_anno <- tss_anno %>%
 ```
 
 ```{r}
-write_tsv(
-  tss_anno,
-  str_c(
-    output_dirs[["Tables"]],
-    "Homo_sapiens.GRCh37.75.TSS_500bp.bed",
-    sep = "/"
-  ),
-  col_names = FALSE
-)
+# write_tsv(
+#   tss_anno,
+#   str_c(
+#     output_dirs[["Tables"]],
+#     "Homo_sapiens.GRCh37.75.TSS_500bp.bed",
+#     sep = "/"
+#   ),
+#   col_names = FALSE
+# )
 ```
 
 ```{bash, eval=False}
@@ -379,6 +379,21 @@ module load BEDTools/2.29.2-GCC-9.3.0
 
 bedtools sort -i Homo_sapiens.GRCh37.75.CollapsedGeneBounds.bed > Homo_sapiens.GRCh37.75.CollapsedGeneBounds.sort.bed
 ```
+
+```{r}
+# gene_id to symbol conversion
+gtf %>%
+  filter(gene_id %in% gene_bounds$gene_id) %>%
+  as_tibble() %>%
+  select(gene_id, gene_name, gene_biotype) %>%
+  distinct() %>%
+  write_tsv(str_c(
+    output_dirs[["Tables"]],
+    "Homo_sapiens.GRCh37.75.gene_to_symbol.tsv",
+    sep = "/"
+  ))
+```
+
 
 # Prepare additional genome files required for the ABC algorithm
 
