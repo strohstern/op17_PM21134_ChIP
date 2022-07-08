@@ -1,0 +1,238 @@
+---
+title: "op288 - ChIP of SWI/SNF (SMARCAB1)"
+author: "Stephanie Strohbuecker"
+subtitle: Read alignment using the nf-core ChIP seq pipeline
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+We are using the [nf-core ChIP pipeline (version 1.2.2)](https://nf-co.re/chipseq/1.2.2) for aligning the reads from the ChIP experiment.
+
+```{r}
+RMD_file_name <- "5-1.op288_SMARCAB1_ChIP_nfcore"
+```
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+```{r}
+pkgload::load_all() # load all the functions available in this project
+```
+The data for the experiment is associated with two LIMS ids and the following sequencing runs:
+
+* DN19154:
+    + 190924_K00102_0399_BHCFW3BBXY (SR101 configuration)
+    + sample A1-A6 (SMARCB1_KOLF2) were run throught the nf-core pipeline as part of `0-2.read_alignment_nfcore.Rmd`
+* PM22166:
+    + 220701_A01366_0231_BHCGW7DMXY (PR100)
+    + 220615_A01366_0220_BHCHNTDMXY (PR150)
+
+Even though some of the runs were run in paired-end mode, we will ignore R2 as the first sequencing run was single-end mode. Furthermore, the reads from 220615_A01366_0220_BHCHNTDMXY need to be trimmed to 100bp to match the older samples.
+
+
+```{r}
+fastq_info <- bind_rows(
+  list.files(
+    "/camp/stp/sequencing/inputs/instruments/fastq/220701_A01366_0231_BHCGW7DMXY/fastq/PM22166",
+    pattern = "fastq.gz",
+    full.names = TRUE
+  ) %>%
+    enframe(value = "fastq_1") %>%
+    select(fastq_1),
+  list.files(
+    "/camp/stp/sequencing/inputs/instruments/fastq/220615_A01366_0220_BHCHNTDMXY/fastq/PM22166",
+    pattern = "fastq.gz",
+    full.names = TRUE
+  ) %>%
+    enframe(value = "fastq_1") %>%
+    select(fastq_1)
+) %>% 
+  mutate(sample_lims = basename(fastq_1)) %>% 
+  filter(str_detect(sample_lims, "_R1_")) %>% 
+  arrange(sample_lims) %>% 
+  mutate(sample_lims = str_remove(sample_lims, "_.*$"))
+```
+
+Before running the nf-core pipeline we will use [cutadapt](https://cutadapt.readthedocs.io/en/stable/index.html) to shorten all reads to 100nt length. Note that the surplus read are trimmed from the 3'end.
+```{bash eval=FALSE, include=FALSE}
+cutadapt -l 10 -o output.fastq.gz input.fastq.gz
+```
+
+```{r}
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+
+fastq_output <- here("data", "derived_data", "fastq_trimmed")
+generate_directories(fastq_output)
+```
+
+
+```{r}
+fastq_info %>%
+  select(fastq_1) %>%
+  deframe() %>%
+  map(function(fastq_file) {
+    output_file <- basename(fastq_file) %>%
+      str_remove(".fastq.gz") %>%
+      str_c("trimmed.fastq.gz", sep = "_") %>%
+      str_c(fastq_output, ., sep = "/")
+    slurm_cmd <-
+      str_c(
+        "sbatch -c 4 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+        str_c(log_dir, "5-1a.fastq_trim_op288.log", sep = "/"),
+        "--error",
+        str_c(log_dir, "5-1a.fastq_trim_op288_error.log", sep = "/"),
+        str_c(scripts_dir, "5-1a.fastq_trim_cutadapt_op288.sh", sep = "/"),
+        fastq_file,
+        output_file,
+        sep = " "
+      )
+    
+    slurm_cmd
+  })
+```
+
+```{r}
+fastq_trimmed <-
+  list.files(fastq_output, pattern = "fastq.gz", full.names = TRUE) %>%
+  enframe(value = "fastq_1") %>%
+  select(fastq_1) %>%
+  mutate(sample_lims = basename(fastq_1)) %>%
+  filter(str_detect(sample_lims, "_R1_")) %>%
+  arrange(sample_lims) %>%
+  mutate(sample_lims = str_remove(sample_lims, "_.*$"))
+```
+
+
+Generate the experimental table input necessary for input into the nf-core ChIP-seq pipeline:
+```{r}
+sample_info <-
+  read_csv(here("data", "raw_data", "projects_docs_op288_SMARCB1_ChIP_reanalysis", "PM22166_design.csv")) %>%
+  rename_with(~ str_replace_all(., " ", "_")) %>%
+  select(sample_lims, sample_name) %>%
+  separate(
+    sample_name,
+    into = c("antibody", "time", "type", "replicate"),
+    sep = "_",
+    remove = FALSE
+  )  %>% #arrange(antibody)
+  filter(antibody == "SMARCB1") %>% 
+  mutate(
+    group = str_remove(sample_name, "_R\\d") %>% 
+      str_remove("_ChIP"),
+    replicate = str_remove(replicate, "^R"),
+    antibody = case_when(
+      str_detect(type, "Input") ~ NA_character_,
+      TRUE ~ antibody
+    ),
+     control = case_when(
+      !is.na(antibody) ~ str_c(group, "Input", sep = "_"),
+      TRUE ~ NA_character_
+    ),
+    fastq_2 = NA_character_
+  )%>%
+  left_join(fastq_trimmed, by = "sample_lims") %>% 
+  select(group,
+         replicate,
+         fastq_1,
+         fastq_2,
+         antibody,
+         control,
+         everything()) %>%
+  arrange(antibody, group, replicate)
+```
+
+
+
+```{r}
+sample_info %>%
+  write_csv(str_c(
+    here("data", "raw_data", "projects_docs_op288_SMARCB1_ChIP_reanalysis"),
+    "PM22166_sample_information.csv",
+    sep = "/"
+  ))
+```
+
+To run read alignment using the ChIP nf-core pipeline, we need to prepare a samplesheet with the following columns:
+
+* group
+* replicate
+* fastq read 1
+* fastq read 2 (if applicable)
+* antibody
+* control
+
+```{r}
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_ChIP_op288", sep = "/"))
+```
+
+
+```{r}
+sample_info %>%
+  select(group, replicate, fastq_1, fastq_2, antibody, control) %>%
+  write_csv(
+    file = str_c(
+      here(),
+      "data",
+      "derived_data",
+      "nfcore_ChIP_op288",
+      "design.csv",
+      sep = "/"
+    ),
+    na = ""
+  )
+```
+
+The results for the nf-core ChIP-seq pipeline will be stored here:
+```{r}
+str_c(here(), "data", "derived_data", "nfcore_ChIP_op288", sep = "/")
+```
+
+The `custom.config` is empty (increased memory for bwa due to error during the pipeline run)
+```{r}
+write_lines(
+  "process {
+  withName:bwa_align {
+    memory = 64.GB
+  }
+}",
+file = str_c(
+  here(),
+  "data",
+  "derived_data",
+  "nfcore_ChIP_op288",
+  "custom.config",
+  sep = "/"
+)
+)
+```
+
+(Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP_op288`).
+
+Note we ran the pipeline with `--broad` option (note that using `-resume` avoids running the whole pipeline).
+```{r}
+slurm_cmd <-
+  str_c(
+    "sbatch -c 1 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir, "nf_core_ChIP_op288.log", sep = "/"),
+    "--error",
+    str_c(log_dir, "nf_core_ChIP_op288_error.log", sep = "/"),
+    str_c(scripts_dir, "5-1b.Run_nfcore_ChIP_op288.sh", sep = "/"),
+    sep = " "
+  ) 
+
+slurm_cmd
+```
+                                                    
