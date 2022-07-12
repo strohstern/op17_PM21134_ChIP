@@ -42,7 +42,7 @@ The data for the experiment is associated with two LIMS ids and the following se
 Even though some of the runs were run in paired-end mode, we will ignore R2 as the first sequencing run was single-end mode. Furthermore, the reads from 220615_A01366_0220_BHCHNTDMXY need to be trimmed to 100bp to match the older samples.
 
 
-```{r}
+```{r, eval=FALSE}
 fastq_info <- bind_rows(
   list.files(
     "/camp/stp/sequencing/inputs/instruments/fastq/220701_A01366_0231_BHCGW7DMXY/fastq/PM22166",
@@ -79,7 +79,7 @@ generate_directories(fastq_output)
 ```
 
 
-```{r}
+```{r, eval=FALSE}
 fastq_info %>%
   select(fastq_1) %>%
   deframe() %>%
@@ -115,6 +115,21 @@ fastq_trimmed <-
   mutate(sample_lims = str_remove(sample_lims, "_.*$"))
 ```
 
+```{r}
+fastq_info <-list.files(
+  "/camp/stp/sequencing/inputs/instruments/fastq/190924_K00102_0399_BHCFW3BBXY/fastq/DN19154",
+  pattern = "fastq.gz",
+  full.names = TRUE
+) %>%
+  enframe(value = "fastq_1") %>%
+  select(fastq_1) %>%
+  mutate(sample_lims = basename(fastq_1)) %>%
+  filter(str_detect(sample_lims, "_R1_")) %>%
+  arrange(sample_lims) %>%
+  mutate(sample_lims = str_remove(sample_lims, "_.*$")) %>% 
+  bind_rows(fastq_trimmed)
+```
+
 
 Generate the experimental table input necessary for input into the nf-core ChIP-seq pipeline:
 ```{r}
@@ -141,9 +156,72 @@ sample_info <-
       !is.na(antibody) ~ str_c(group, "Input", sep = "_"),
       TRUE ~ NA_character_
     ),
-    fastq_2 = NA_character_
+    fastq_2 = NA_character_,
+    genotype = "WT"
   )%>%
-  left_join(fastq_trimmed, by = "sample_lims") %>% 
+  # left_join(fastq_trimmed, by = "sample_lims") %>% 
+  select(group,
+         replicate,
+         # fastq_1,
+         fastq_2,
+         antibody,
+         control,
+         everything()) %>%
+  arrange(antibody, group, replicate) %>% 
+  select(-time, -type)
+```
+ 
+
+```{r}
+DN19154_sample_info <- readxl::read_excel(
+  here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "SMARCB1_ChIP_replacment_info_vs09-05-2022.xlsx"
+  ),
+  skip = 1
+) %>%
+  select(sample_lims = `Sample limsid`, sample_name = `Sample Name`) %>%
+  arrange(sample_name) %>%
+  mutate(
+    group = str_remove(sample_name, "1percent_") %>%
+      str_remove("ChIP_") %>%
+      str_remove("_$") %>%
+      str_remove("_K4.*$|_C1.*$") %>%
+      str_remove("ASCL1_")
+  ) %>%
+  group_by(group) %>%
+  mutate(replicate = row_number() %>% as.character()) %>%
+  ungroup() %>%
+  separate(group, into = c("antibody", "genotype")) %>%
+  mutate(
+    genotype = str_replace(genotype, "KO", "ASCL1_KO"),
+    group = str_c(antibody, genotype, sep = "_"),
+    fastq_2 = NA_character_,
+    antibody = case_when(
+      str_detect(sample_name, "INPUT") ~ NA_character_,
+      TRUE ~ antibody
+    ),
+    control = case_when(
+      !is.na(antibody) ~ str_c("INPUT", genotype, sep = "_"),
+      TRUE ~ NA_character_
+    )
+  ) %>% 
+  filter(genotype == "ASCL1_KOLF2") %>% 
+  select(group,
+         replicate,
+         # fastq_1,
+         fastq_2,
+         antibody,
+         control,
+         everything()) %>%
+  arrange(antibody, group, replicate)
+```
+
+```{r}
+sample_info <- bind_rows(sample_info, DN19154_sample_info) %>%
+  left_join(fastq_info, by = "sample_lims") %>% 
   select(group,
          replicate,
          fastq_1,
@@ -155,12 +233,11 @@ sample_info <-
 ```
 
 
-
 ```{r}
 sample_info %>%
   write_csv(str_c(
     here("data", "raw_data", "projects_docs_op288_SMARCB1_ChIP_reanalysis"),
-    "PM22166_sample_information.csv",
+    "op288_SMARCB1_ChIP_reanalysis_sample_information.csv",
     sep = "/"
   ))
 ```
