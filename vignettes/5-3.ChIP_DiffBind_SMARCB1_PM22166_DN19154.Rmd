@@ -1,0 +1,211 @@
+---
+title: "op288 - ChIP of SWI/SNF (SMARCAB1)"
+subtitle: "Alternative approach to identify consensus peaks using DiffBind (runs PM22166 and DN19154)"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, eval=FALSE, include=FALSE}
+rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/5-2b.ChIP_QC_SMARCB1_PM22166_DN19154.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/5-2b.ChIP_QC_SMARCB1_PM22166_DN19154.html")
+```
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+# Project summary
+
+(taken from the ASF project proposal form)
+    
+"
+
+The generation of the mammalian brain involves rapid and time-specific changes in gene expression. The mammalian SWI/SNF chromatin remodelling complex plays critical roles in the regulation of transcription. Proneural transcription factors drive the proliferation of neural progenitors and their differentiation into neurons. We hypothesise that the proneural factor ASCL1, which has been shown to act as a pioneer factor, recruits mSWI/SNF complexes to the DNA, resulting in opening of the chromatin that becomes accessible to other transcription factors. Supporting this model, we have established by co-IP that ASCL1 interacts physically with the SMARCC1/BAF155 subunit of the BAF complex. We chose SMARCC1 as it is a core subunit of the complex, presumably present in all variants of the complex. Furthermore, preliminary data from ChIP-Seq that we performed in wild-type human iPSCs-derived neural cultures shows that ASCL1 and SMARCB1 (another core subunit of the complex) have largely overlapping DNA-binding landscapes (>60%). However, when we overlapped the ASCL1 binding sites with publicly available ChIP-seq datasets for core subunits of the mSWI/SNF complex, we noticed the overlap being even higher (up to 85%). We suspect this difference is coming from the high variability between the replicates that were sent for sequencing (Figure 1). Therefore, we would like to sequence three more replicates for the SMARCB1 ChIP. By combining the six replicates, we will be able to generate a higher quality consensus set of peaks for SMARCB1. 
+
+"
+
+We are analysing the ChIP-seq data using the nextflow [ChIP-seq pipeline](https://nf-co.re/chipseq) available at [nf-core](https://nf-co.re/) using the `--broad` option for MACS to identify broad peaks for SMARCB1.
+The pipeline allows to obtain QC metrics, performs alignment and merging of multiple libraries, filtering and alignment QC.
+It further analyses and annotated the obtained peaks.
+
+We aligned against: `Homo_sapiens.GRCh37.75` as that was the genome used previously.
+
+```{r}
+RMD_file_name <- "5-3.ChIP_DiffBind_SMARCB1_PM22166_DN19154"
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(ggpubr)
+
+library(plyranges)
+library(DiffBind)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+base_dir <- here("data", "derived_data", "nfcore_ChIP_op288", "results", "bwa", "mergedLibrary")
+
+peak_files <-
+  list.files(here(base_dir, "macs", "broadPeak"),
+             pattern = "peaks.xls",
+             full.names = TRUE) %>%
+  set_names(str_remove(basename(.), "_peaks.xls"))
+
+bam_files <- list.files(here(base_dir),
+                        pattern = ".bam$",
+                        full.names = TRUE) %>%
+  set_names(str_remove(basename(.), ".mLb.clN.sorted.bam"))
+
+output_dirs <-
+  str_c(
+    here(),
+    "data/derived_data",
+    c("Tables", "R_objects", "Figures"),
+    RMD_file_name,
+    sep = "/"
+  ) %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+       generate_directories(.x))
+
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+```
+
+```{r}
+blacklist <- read_bed(
+  here(
+    "data",
+    "derived_data",
+    "Tables",
+    "3-2.ABC_algorithm_TSS_annotation",
+    "ENCFF001TDO_blocklisted_regions_GRCh37.ensembl.sort.bed"
+  )
+)
+```
+
+# DiffBind alternative analysis
+
+```{r}
+bam_ctrls <- bam_files %>%
+  enframe(name = "SampleID", value = "bamControl") %>%
+  filter(str_detect(SampleID, "INPUT|Input")) %>% 
+  mutate(SampleID = str_replace(SampleID, "INPUT_ASCL1_KOLF2_R", "SMARCB1_ASCL1_KOLF2_R") %>% 
+           str_remove("Input_"))
+```
+
+## Reading in peak sets
+
+```{r}
+# generate sample_sheet
+sample_info <- peak_files %>%
+  enframe(name = "SampleID", value = "Peaks") %>%
+  separate(
+    SampleID,
+    into = c("Tissue", "Replicate"),
+    sep = "_R",
+    remove = FALSE
+  ) %>%
+  mutate(Condition = "WT",
+         PeakCaller = "macs",
+         Tissue = str_remove(Tissue, "SMARCB1_")) %>%
+  left_join(bam_files %>%
+              enframe(name = "SampleID", value = "bamReads"), by = "SampleID") %>% 
+  left_join(bam_ctrls) %>% 
+  select(SampleID, Tissue, Condition, Replicate, bamReads, bamControl, Peaks, PeakCaller)
+```
+
+```{r}
+wt <- dba(sampleSheet = sample_info)
+```
+
+```{r}
+profiles <- dba.plotProfile(wt)
+dba.plotProfile(profiles)
+```
+
+```{r}
+# Apply blacklist
+wt <- dba.blacklist(wt, blacklist = blacklist, greylist = blacklist)
+```
+
+```{r}
+plot(wt)
+```
+
+```{r}
+olap.rate <- dba.overlap(wt, mode = DBA_OLAP_RATE)
+olap.rate
+```
+
+```{r}
+plot(olap.rate,
+     type = 'b',
+     ylab = '# peaks',
+     xlab = 'Overlap at least this many peaksets')
+```
+
+```{r}
+dba.peakset(wt, bRetrieve = TRUE) %>% 
+  as_tibble() %>%
+  ggplot(aes(width)) + 
+  geom_density() +
+  geom_vline(xintercept = (1000))
+```
+
+## Counting reads
+
+Calculate count information for each of the peaks/regions in the consensus set. For each of the consensus regions `DiffBind` takes the number of uniquely aligned reads to compute a normalised read count for each sample at every potential binding site. The peaks in the consensus peakset are re-centred and trimmed based on calculating their summits (point of greatest read overlap) in order to provide more standardized peak intervals.
+As the most common peak interval size is 1000, we chose `summit=500`. Note that using summits assumes that the summit is a good representation of the peak. (Based on the profile plot above this seems to be the case.)
+
+By default the data are normalized based on sequencing depth.
+```{r}
+wt <- dba.count(wt, minOverlap = 2, summit = 500)
+```
+
+
+```{r}
+cand_peakset <- dba.peakset(wt, bRetrieve = TRUE) %>% 
+  as_tibble() %>% 
+  rename_with(.cols = starts_with("SMARCB1"), ~str_c(., "_DiffBindScore"))
+```
+
+
+# Identify overlap between consensus peak set and individual sample peak set
+
+```{r}
+cand_peakset <- bind_cols(cand_peakset,
+                          wt$called %>%
+                            as_tibble() %>%
+                            rename_with( ~ str_c(., "_Bool"))) %>%
+  mutate(nb_sample = rowSums(select(., contains("Bool"))))
+```
+
+```{r}
+cand_peakset  %>% 
+  write_tsv(str_c(
+    output_dirs[["Tables"]],
+    "consensus_peaks_DiffBind.txt",
+    sep = "/"
+  ),
+  col_names = TRUE)
+```
+
+

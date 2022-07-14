@@ -1,0 +1,504 @@
+---
+title: "op288 - ChIP of SWI/SNF (SMARCAB1)"
+subtitle: "Analysis of ChIP - QC (runs PM22166 and DN19154)"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, eval=FALSE, include=FALSE}
+rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/5-2b.ChIP_QC_SMARCB1_PM22166_DN19154.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/5-2b.ChIP_QC_SMARCB1_PM22166_DN19154.html")
+```
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+# Project summary
+
+(taken from the ASF project proposal form)
+    
+"
+
+The generation of the mammalian brain involves rapid and time-specific changes in gene expression. The mammalian SWI/SNF chromatin remodelling complex plays critical roles in the regulation of transcription. Proneural transcription factors drive the proliferation of neural progenitors and their differentiation into neurons. We hypothesise that the proneural factor ASCL1, which has been shown to act as a pioneer factor, recruits mSWI/SNF complexes to the DNA, resulting in opening of the chromatin that becomes accessible to other transcription factors. Supporting this model, we have established by co-IP that ASCL1 interacts physically with the SMARCC1/BAF155 subunit of the BAF complex. We chose SMARCC1 as it is a core subunit of the complex, presumably present in all variants of the complex. Furthermore, preliminary data from ChIP-Seq that we performed in wild-type human iPSCs-derived neural cultures shows that ASCL1 and SMARCB1 (another core subunit of the complex) have largely overlapping DNA-binding landscapes (>60%). However, when we overlapped the ASCL1 binding sites with publicly available ChIP-seq datasets for core subunits of the mSWI/SNF complex, we noticed the overlap being even higher (up to 85%). We suspect this difference is coming from the high variability between the replicates that were sent for sequencing (Figure 1). Therefore, we would like to sequence three more replicates for the SMARCB1 ChIP. By combining the six replicates, we will be able to generate a higher quality consensus set of peaks for SMARCB1. 
+
+"
+
+We are analysing the ChIP-seq data using the nextflow [ChIP-seq pipeline](https://nf-co.re/chipseq) available at [nf-core](https://nf-co.re/) using the `--broad` option for MACS to identify broad peaks for SMARCB1.
+The pipeline allows to obtain QC metrics, performs alignment and merging of multiple libraries, filtering and alignment QC.
+It further analyses and annotated the obtained peaks.
+
+We aligned against: `Homo_sapiens.GRCh37.75` as that was the genome used previously.
+
+
+
+```{r}
+RMD_file_name <- "5-2b.ChIP_QC_SMARCB1_PM22166_DN19154"
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(ggpubr)
+
+library(plyranges)
+
+library(UpSetR)
+
+library(DESeq2)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+base_dir_macs <- here("data",
+      "derived_data",
+      "nfcore_ChIP_op288",
+      "results",
+      "bwa",
+      "mergedLibrary",
+      "macs")
+
+broad_dir <- str_c(base_dir_macs, "broadPeak", sep = "/")
+
+output_dirs <-
+  str_c(here(),
+        "data/derived_data",
+        c("Tables", "R_objects", "Figures"),
+        RMD_file_name,
+        sep = "/") %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+      generate_directories(.x))
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+meta_data <-
+  read_csv(here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP_op288",
+    "design.csv"
+  )) %>%
+  mutate(sample_name = str_remove(basename(fastq_1), "_.*$")) %>%
+  select(sample_name, group, replicate, antibody, control) %>% 
+  mutate(sample_id = str_c(group, "_R", replicate, sep = "")) %>% 
+  distinct()
+
+SMARCB1_consensus_peaks <-
+  read_tsv(
+    here(
+      broad_dir,
+      "consensus",
+      "SMARCB1",
+      "SMARCB1.consensus_peaks.boolean.annotatePeaks.txt"
+    )
+  )
+```
+
+
+
+```{r}
+meta_data %>% 
+  DT::datatable(caption = "Available samples")
+```
+
+
+```{r}
+broad_peaks_files <- list.files(
+  here(
+    broad_dir
+  ),
+  pattern = ".broadPeak",
+  full.names = TRUE
+)
+```
+
+# Visualisation of ChIP-seq results in IGV
+
+The results of the ChIP-seq can be visualised using the [IGV browser](http://software.broadinstitute.org/software/igv/). An igv session file (`igv_session.xml`) can be found in the `nfcore_ChIP_op288/igv/combinedPeak` folder. To visualise the data open the IGV browser, go to `File` -> `Open Session` locate the `igv_session.xml` file and open it. To add the genome annotation go to `File` -> `Load from File` and load the `Homo_sapiens.GRCh37.75.bed` file located in the `nfcore_ChIP_op288/genome` directory.
+
+# QC of ChIP-seq results {.tabset .tabset-fade .tabset-pills}
+The quality check output from the [ChIP-seq pipeline](https://nf-co.re/chipseq) can be found in the following [MultiQC](https://multiqc.info/) report.
+
+## Broad Peaks
+
+```{r message=FALSE}
+xfun::embed_file(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP_op288",
+    "results",
+    "multiqc",
+    "broadPeak",
+    "multiqc_report.html"
+  ),
+  text = paste("nf-core_ChIPseq_op288_multiqc_report_broadPeaks.html")
+)
+```
+
+Overall the sequencing quality is good.
+
+# {-}
+
+We generated Fingerprint plots as described by [deepTools](https://deeptools.readthedocs.io/en/develop/content/tools/plotFingerprint.html). These plots can be used to assess the strength of a ChIP.
+An (ideal) input sample is expected to yield a straight diagonal line, due to a perfect uniform distribution of reads along the genome (with the assumption that there are no enrichments in open chromatin regions). A specific and strong ChIP enrichment should result in the majority of reads located to few bins, which results in a steep rise of the cumulative sum towards the highest rank.
+
+```{r, fig.height=10, fig.width=20, message=FALSE, warning=FALSE, results="hide", fig.keep="all"}
+read_tsv(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP_op288",
+    "results",
+    "bwa",
+    "mergedLibrary",
+    "deepTools",
+    "plotFingerprint",
+    "deeptools_fingerprint_plot.tsv"
+  )
+) %>%
+  pivot_longer(-rank, names_to = "sample_id", values_to = "fraction") %>%
+  filter(!is.na(fraction)) %>% 
+  left_join(meta_data, by = "sample_id") %>%
+  mutate(
+    antibody = case_when(is.na(antibody) ~ group,
+                         TRUE ~ antibody),
+    grouping = str_remove(group, "_Input"),
+    nominal_AB = str_remove(grouping, "^.*_")
+  ) %>%
+  group_by(nominal_AB) %>%
+  group_split() %>%
+  map( ~ {
+    col_pal <- .x %>%
+      select(sample_id) %>%
+      distinct() %>%
+      mutate(inputs = case_when(str_detect(sample_id, "Input|INPUT") ~ "Input",
+                                TRUE ~ "Not")) %>%
+      group_by(inputs) %>%
+      group_split() %>%
+      map( ~ case_when(str_detect(unique(.x$inputs), "Not") ~ {
+        structure(viridis::viridis(NROW(.x)))
+      },
+      TRUE ~ {
+        structure(RColorBrewer::brewer.pal(NROW(.x), "Greys"))
+      }) %>%
+        set_names(.x$sample_id)) %>%
+      purrr::reduce(c)
+    
+    .x %>%
+      ggplot(aes(x = rank, y = fraction)) +
+      geom_abline(intercept = 0,
+                  slope = 1,
+                  colour = "grey1") +
+      geom_line(aes(colour = sample_id))  +
+      scale_colour_manual(values = col_pal) +
+      guides(col = guide_legend(ncol = 2)) +
+      labs(
+        title = str_c(
+          "Fingerprint plot for ChIP",
+          unique(.x$nominal_AB) ,
+          "samples",
+          sep = " "
+        ),
+        x = "rank",
+        y = "fraction w.r.t. bin with highest coverage"
+      )
+  }) %>%
+  ggarrange(plotlist = .)	
+```
+
+Based on the Fingerprint plots above, we see a very slight enrichment for SMARCB1 in comparison to the input controls.
+
+Another way to look at the enrichment of binding along genes are [profile plots](https://deeptools.readthedocs.io/en/develop/content/tools/plotProfile.html). These plots visualize scores over sets of genomic regions, i.e. genes. 
+
+```{r, fig.height=10, fig.width=20, message=FALSE, warning=FALSE, results="hide", fig.keep="all"}
+read_tsv(
+  here(
+    "data",
+    "derived_data",
+    "nfcore_ChIP_op288",
+    "results",
+    "bwa",
+    "mergedLibrary",
+    "deepTools",
+    "plotProfile",
+    "read_distribution_profile.tsv"
+  )
+) %>%
+  pivot_longer(-Category, names_to = "sample_id", values_to = "occurence") %>%
+  left_join(meta_data) %>%
+  mutate(
+    antibody = case_when(is.na(antibody) ~ group,
+                         TRUE ~ antibody),
+    grouping = str_remove(group, "_Input|_INPUT"),
+    nominal_AB = str_remove(grouping, "^.*_")
+  ) %>%
+  group_by(nominal_AB) %>%
+  group_split() %>%
+  map(~ {
+    col_pal <- .x %>%
+      select(sample_id) %>%
+      distinct() %>%
+      mutate(inputs = case_when(str_detect(sample_id, "Input|INPUT") ~ "Input",
+                                TRUE ~ "Not")) %>%
+      group_by(inputs) %>%
+      group_split() %>%
+      map(~ case_when(str_detect(unique(.x$inputs), "Not") ~ {
+        structure(viridis::viridis(NROW(.x)))
+      },
+      TRUE ~ {
+        structure(RColorBrewer::brewer.pal(NROW(.x), "Greys"))
+      }) %>%
+        set_names(.x$sample_id)) %>%
+      purrr::reduce(c)
+    
+    .x %>%
+      ggplot(aes(x = Category, y = occurence)) +
+      geom_vline(xintercept = c(-3000, 0, 1000, 4000),
+                 colour = "grey77") +
+      geom_line(aes(colour = sample_id)) +
+      labs(
+        title = str_c(
+          "Profile plot for ChIP",
+          unique(.x$nominal_AB) ,
+          "samples",
+          sep = " "
+        ),
+        x = "",
+        y = "Occurence"
+      ) +
+      # facet_grid(rows = vars(genotype), cols = vars(antibody)) +
+      guides(col = guide_legend(ncol = 2)) +
+      scale_colour_manual(values = col_pal) +
+      scale_x_continuous(
+        breaks = c(-3000, 0, 1000, 4000),
+        labels = c(
+          "-3000" = "-3.0Kb",
+          "0" = "TSS",
+          "1000" = "TES",
+          "4000" = "4Kb"
+        )
+      )
+  }) %>% 
+  ggarrange(plotlist = .)
+```
+
+The SMARCB1 antibody seem to preferentially bind to the promoter regions.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# columns in narrowPeak file: name, integer score for display (UCSC ENCODE narrowPeak format), fold-change at peak summit, -log10pvalue at peak summit, -log10qvalue at peak summit, relative summit position to peak start
+broad_macs_peaks <-
+  map(broad_peaks_files, ~ {
+    read_tsv(
+      .x,
+      col_names = c(
+        "seqnames",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "foldchange",
+        "-log10pvalue",
+        "-log10qvalue"
+      )
+    ) %>%
+      mutate(strand = case_when(strand == "." ~ "*",
+                                TRUE ~ strand)) %>%
+      as_granges()
+  }) %>%
+  set_names(basename(broad_peaks_files) %>%
+              str_remove("_peaks.broadPeak"))
+```
+
+```{r, fig.height=8}
+map_df(broad_macs_peaks, ~ length(.x)) %>%
+  pivot_longer(cols = everything(),
+               names_to = "sample_id",
+               values_to = "nb_peaks") %>%
+  left_join(meta_data, by = "sample_id") %>%
+  group_by(antibody) %>%
+  group_split() %>%
+  map(
+    ~ .x %>%
+      ggplot(aes(x = group, y = nb_peaks)) +
+      geom_boxplot() +
+      labs(
+        title = "Number of detected peaks in each sample",
+        subtitle = unique(.x$antibody),
+        x = "",
+        y = "Number of peaks"
+      ) +
+      expand_limits(x = 0, y = 0)
+  )
+```
+The number of detected consensus peaks. The consensus peak set only includes those peaks that were detected in at least 2 replicates.
+
+With this approach we identified `r NROW(SMARCB1_consensus_peaks)` with the SMARCB1 antibody (broad peaks).
+
+#### {.tabset .tabset-fade .tabset-pills}
+
+##### SMARCB1 antibody
+
+```{r fig.height=8, message=FALSE, warning=FALSE}
+SMARCB1_consensus_peaks %>%
+  mutate(peak_id = str_c(chr, start, end, interval_id)) %>%
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>%
+  as.data.frame() %>%
+  upset(
+    sets = (
+      SMARCB1_consensus_peaks %>% dplyr::select(contains("bool")) %>% colnames()
+    ),
+    order.by = "freq",
+    keep.order = TRUE
+  )
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+
+#### {-}
+
+## Peak annotation
+
+The annotation of the total peaks relative to genomic features was performed using HOMER with the following definitions:
+
+* promoter-TSS: by default defined from -1kb to +100bp
+* TTS: by default defined from -100 bp to +1kb
+
+```{r, fig.height=8, message=FALSE, warning=FALSE, results="hide", fig.keep="all"}
+read_delim(here(broad_dir, "qc", "macs_annotatePeaks.summary.txt")) %>%
+  pivot_longer(cols = !sample,
+               names_to = "annotation",
+               values_to = "peak_count") %>%
+  ggplot(aes(
+    fill = factor(
+      annotation,
+      levels = c(
+        "Unassigned",
+        "exon",
+        "TTS",
+        "promoter-TSS",
+        "intron",
+        "Intergenic"
+      )
+    ),
+    x = sample,
+    y = peak_count
+  )) +
+  geom_bar(position = "stack", stat = "identity") +
+  xlab("ChIP samples") +
+  ylab("Peak count") +
+  labs(fill = "Genomic features") +
+  ggtitle("Total peaks") +
+  scale_x_discrete(guide = guide_axis(angle = 90))
+```
+
+The majority of peaks for SMARCB1  seem to fall into promoter-TSS/TSS, intronic and intergenic regions.
+
+
+# Alternative approach to identify consensus peaks
+
+Rather than using the standard approach used above to identfiy consensus peaks, we used the Bioconductor package [DiffBind](https://bioconductor.org/packages/release/bioc/html/DiffBind.html).
+Using peaks that occur in at least 2 peak sets to generate consensus regions, `DiffBind` takes the number of uniquely aligned reads to compute a normalised read count for each sample at every potential binding site. The peaks in the consensus peakset are re-centred and trimmed based on calculating their summits (point of greatest read overlap) in order to provide more standardized peak intervals.
+As the most common peak interval size in this dataset is 1000, we chose `summit = 500`. Note that using summits assumes that the summit is a good representation of the peak. 
+
+```{r message=FALSE}
+diffbind_cons_peaks <-
+  read_tsv(
+    here(
+      "data",
+      "derived_data",
+      "Tables",
+      "5-3.ChIP_DiffBind_SMARCB1_PM22166_DN19154",
+      "consensus_peaks_DiffBind.txt"
+    )
+  )
+```
+
+With this approach we identified the `r NROW(diffbind_cons_peaks)` consensus peaks. 
+
+The peaks identified with DiffBind show the following overlap:
+```{r fig.height=8, message=FALSE, warning=FALSE}
+diffbind_cons_peaks %>% 
+  mutate(interval_id = str_c("interval", rownames(.), sep = "_"),
+    peak_id = str_c(seqnames, start, end, interval_id, sep = )) %>%
+  mutate_at(vars(contains("bool")), ~ as.integer(.)) %>%
+  as.data.frame() %>%
+  upset(
+    sets = (
+      diffbind_cons_peaks %>% dplyr::select(contains("bool")) %>% colnames()
+    ),
+    order.by = "freq",
+    keep.order = TRUE
+  )
+
+# consensus_peaks %>% filter(chr %in% c(1:22, "X", "Y"))
+```
+
+An excel file with all the peaks (standard and DiffBind approach), in addition to the bed file with the DiffBind consensus peaks, can be downloaded from the following link:
+
+```{r}
+openxlsx::write.xlsx(
+  list(
+    "SMARCB1_consensus_peaks_full" = SMARCB1_consensus_peaks %>%
+      mutate(peak_id = str_c(chr, ":", start, "-", end, sep = "")) %>% 
+      relocate(peak_id),
+    "SMARCB1_consensus_DiffBind" = diffbind_cons_peaks %>%
+      mutate(peak_id = str_c(seqnames, ":", start, "-", end, sep = "")) %>% 
+      relocate(peak_id)
+  ),
+  file = str_c(output_dirs["Tables"],
+               "Consensus_peak_information.xlsx",
+               sep = "/"),
+  overwrite = TRUE
+)
+```
+
+```{r}
+diffbind_cons_peaks %>%
+  mutate(interval_id = str_c("interval", rownames(.), sep = "_"),
+         score = 0) %>%
+  select(seqnames, start, end, interval_id, score, strand) %>%
+  write_tsv(
+    str_c(
+      output_dirs[["Tables"]],
+      "consensus_DiffBind_macs_narrowPeak_candidateRegions.bed",
+      sep = "/"
+    ),
+    col_names = FALSE
+  )
+```
+
+
+```{r}
+excel_files_path <-
+  list.files(output_dirs["Tables"], full.names = TRUE) %>%
+  set_names(basename(.))
+```
+
+```{r, results="asis"}
+xfun::pkg_load2(c('base64enc', 'htmltools', 'mime'))
+
+imap(excel_files_path, function(file_path, file_text) {
+  xfun::embed_file(file_path,
+                   text = file_text)
+})
+```
