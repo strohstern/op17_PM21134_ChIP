@@ -1,0 +1,328 @@
+---
+title: "op29 - Re-quantification of ATAC-seq"
+subtitle: ""
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, eval=FALSE, include=FALSE}
+rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/3-1.ABC_algorithm.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/3-1.ABC_algorithm.html")
+```
+
+Identification of differential accessibility analysis (ATAC-seq) between genotypes using as input the provided set of peaks from wild-type neurons.
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+# Project summary
+
+(taken from the project proposal form)
+    
+"
+An initial ATAC-seq experiment (Lims ID PM19276, run  200120_K00102_0447_AHFVFTBBXY) was carried out and Harshil Patel performed the peak calling and differential accessibility analysis. From this experiment, we were particularly interested in the following comparisons:
+1) NP_WT vs NRS_WT
+2) NRS_ASCL1_KO vs NRS_WT
+
+A second ATAC-seq experiment  (Lims ID PM21132, run  210723_A01366_0037_BH2NLTDMXY) was carried out and Miriam Iloriansopena performed the peak calling and differential accessibility analysis. From this experiment, we were particularly interested in the following comparisons:
+1) 48h_DMSO vs WT
+2) 48h_BRM014 vs 48h_DMSO
+3) 48h_BRM014 vs WT
+
+While some of the samples were unique to each of the two experiments, the WT samples come from the same cells (human iPSC-derived neuronal cells at day 24 post neural induction). However, we noticed approximately 55,000 accessible regions in the consensus set of peaks in WT cells from experiment 1, and only approximately 33,000 accessible regions in the consensus set of peaks in WT cells from experiment 2. Since ultimately we are interested in the regions which loose accessibility in both ASCL1_KO and BMR014 mutants relative to the WT cells, we find this discrepancy in their relative WT controls unexpected. Having a closer look at specific genomic regions, we concluded that, most likely, this discrepancy comes from the different signal to noise ratios in the two experiments. More specifically, two of the three wild-type replicates we provided as wild-type samples in the second experiment seem to have a lower signal to noise ration when compared to the third one from the same experiment, or with the other two wild-type replicates from the first experiment. 
+
+Therefore, we would like to generate a consensus set of peaks from the two experiments and use them for the downstream differential accessibility analysis. To be able to carry on the analysis described above, I swiched to “—min_reps_consensus 1” for both experiments (since most likely the discrepancy between the two experiments came from the weak signal to noise ratio in the two replicates from the second experiment). I then overlapped the wild-type peaks from both experiments (1bp overlap) and generate what we will now call the consensus set of peaks for the wild-type samples (called “wt_nrs_consensus_peaks.txt”).
+
+After further discussions with Miram Llorian Sopena, I also used the same criteria (“—min_reps_consensus 1”) to generate new consensus sets of peaks for all the other genotypes. 
+
+Using the provided sets of consensus peaks and specifically only for the peaks identified in the wt neurons (“wt_nrs_consensus_peaks.txt”), I would like to ask for differential accessibility analysis for the following comparisons: 
+
+1) –  wt progenitors (“wt_np_consensus_peaks.txt”) vs  wt neurons (“wt_nrs_consensus_peaks.txt”)
+– ascl1ko neurons (“ascl1ko_nrs_consensus_peaks.txt)  vs  wt neurons (“wt_nrs_consensus_peaks.txt”)
+
+Please find the IDs corresponding to the raw data of these samples highlighted in the  attached PM19276 Excel spreadsheet.
+
+2) – 48h dmso neurons (“48h_dmso_nrs_consensus_peaks.txt”) vs wt neurons (“wt_nrs_consensus_peaks.txt”)
+– 48h brm014 neurons (“48h_brm014_nrs_consensus_peaks.txt”) vs wt neurons (“wt_nrs_consensus_peaks.txt”)
+              – 48h brm014 neurons   
+              (“48h_brm014_nrs_consensus_peaks.txt”) vs 48h dmso 
+              neurons (“48h_dmso_nrs_consensus_peaks.txt”)
+
+Please find the IDs corresponding to the raw data of these samples highlighted in the  attached PM21132 Excel spreadsheet.
+"
+
+
+* [ATAC-seq pipeline, version 1.2.1](https://nf-co.re/atacseq/1.2.1) using the option for MACS (default FDR cut-off `-q 0.05`)
+
+The pipelines allow to obtain QC metrics, perform alignment and merging of multiple libraries, filtering and alignment QC. They also allow further analyses including, for example, annotation of obtained peaks.
+
+We aligned against: `Homo_sapiens.GRCh37.75` as that was the genome used for the RNA-seq analysis.
+
+Merge (union) of the consensus peaks that Oana provided.
+
+```{r}
+RMD_file_name <- "4-1.Re-quantify_ATAC_op19"
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(ggpubr)
+
+library(plyranges)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+PM19276 <-
+  readxl::read_excel(
+    here(
+      "data",
+      "raw_data",
+      "project_docs_op19_ATAC_requantify",
+      "PM19276.xlsx"
+    ),
+    skip = 1
+  ) %>% rename_with(~ str_replace_all(., " ", "_")) %>%
+  select(
+    Sample_limsid,
+    Sample_Name,
+    Reference_Genome,
+    Requested_Run_Type,
+    Sample_Genotype
+  ) %>%
+  filter(
+    Sample_limsid %in% c(
+      "PAU617A1",
+      "PAU617A20",
+      "PAU617A24",
+      "PAU617A32",
+      "PAU617A34",
+      "PAU617A35",
+      "PAU617A6"
+    )
+  ) %>%
+  mutate(project_lims = "PM19276",
+         sequencing_run_id = "200120_K00102_0447_AHFVFTBBXY")
+
+PM21132 <-
+  readxl::read_excel(
+    here(
+      "data",
+      "raw_data",
+      "project_docs_op19_ATAC_requantify",
+      "PM21132.xlsx"
+    ),
+    skip = 1
+  ) %>% rename_with(~ str_replace_all(., " ", "_")) %>%
+  select(
+    Sample_limsid,
+    Sample_Name,
+    Reference_Genome,
+    Requested_Run_Type,
+    Sample_Genotype
+  ) %>%
+  filter(
+    Sample_limsid %in% c(
+      "PAU3854A1",
+      "PAU3854A11",
+      "PAU3854A17",
+      "PAU3854A19",
+      "PAU3854A21",
+      "PAU3854A28",
+      "PAU3854A29",
+      "PAU3854A8",
+      "PAU3854A9"
+    )
+  ) %>%
+  mutate(project_lims = "PM21132",
+         sequencing_run_id = "210723_A01366_0037_BH2NLTDMXY")
+
+output_dirs <-
+  str_c(
+    here(),
+    "data/derived_data",
+    c("Tables", "R_objects", "Figures"),
+    RMD_file_name,
+    sep = "/"
+  ) %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+       generate_directories(.x))
+
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+```
+
+
+```{r, eval=FALSE}
+sample_info <- bind_rows(PM19276, PM21132[, colnames(PM19276)]) %>%
+  mutate(
+    fastq_location = str_c(
+      "/camp/stp/sequencing/inputs/instruments/fastq/",
+      sequencing_run_id,
+      "/fastq/",
+      project_lims,
+      "/",
+      Sample_limsid,
+      "_.*.fastq.gz",
+      sep = ""
+    )
+  ) 
+```
+
+```{r, eval=FALSE}
+sample_info %>%
+  write_tsv(str_c(output_dirs[["Tables"]], "ATAC_seq_op19_sample_information.tsv", sep = "/"))
+```
+
+```{r, eval = FALSE}
+sample_info %>%
+  select(fastq_location) %>%
+  write_tsv(
+    str_c(
+      output_dirs[["Tables"]],
+      "ATAC_seq_op19_files_for_unarchiving.txt",
+      sep = "/"
+    ),
+    col_names = FALSE
+  )
+```
+
+
+```{r}
+sample_info <- bind_rows(PM19276, PM21132[, colnames(PM19276)]) %>%
+  mutate(group = str_c(Sample_Genotype, project_lims, sep = "_") %>%
+           str_replace_all(" ", "_")) %>%
+  relocate(group, .after = "Sample_limsid") %>%
+  arrange(group) %>% 
+  group_by(group) %>%
+  mutate(replicate = rep_along(group, 1:length(.))) %>% 
+  relocate(replicate, .after = group)
+```
+
+
+```{r}
+fastq1_files <- list.files(
+  c(
+    "/camp/stp/sequencing/inputs/instruments/fastq/210723_A01366_0037_BH2NLTDMXY/fastq/PM21132",
+    "/camp/stp/babs/scratch/strohbs/projects/guillemotf/oana.paun/op19_ATAC_seq_requantification/raw_data"
+  ),
+  pattern = "_R1_.*.fastq.gz",
+  full.names = TRUE
+) %>% 
+  set_names(str_remove(basename(.), "_R1.*fastq.gz")) %>% 
+  enframe(name = "Sample_limsid", value = "fastq_1")
+
+fastq2_files <- list.files(
+  c(
+    "/camp/stp/sequencing/inputs/instruments/fastq/210723_A01366_0037_BH2NLTDMXY/fastq/PM21132",
+    "/camp/stp/babs/scratch/strohbs/projects/guillemotf/oana.paun/op19_ATAC_seq_requantification/raw_data"
+  ),
+  pattern = "_R2_.*.fastq.gz",
+  full.names = TRUE
+) %>% 
+  set_names(str_remove(basename(.), "_R2.*fastq.gz")) %>% 
+  enframe(name = "Sample_limsid", value = "fastq_2")
+```
+
+```{r}
+fastq_files <- full_join(fastq1_files, fastq2_files, by = "Sample_limsid") %>% 
+  mutate(Sample_limsid = str_remove(Sample_limsid, "_.*$"))
+```
+
+```{r}
+sample_info <- left_join(sample_info, fastq_files, by = "Sample_limsid")
+```
+
+
+```{r}
+sample_info
+```
+
+
+To run read alignment using the ATAC nf-core pipeline, we need to prepare a samplesheet with the following columns:
+
+* group
+* replicate
+* fastq read 1
+* fastq read 2 
+
+```{r}
+generate_directories(str_c(here(), "data", "derived_data", "nfcore_ATAC_op19", sep = "/"))
+```
+
+
+```{r}
+# fastq for PM19276 already archived
+sample_info %>%
+  select(group, replicate, contains("fastq")) %>% 
+  write_csv(
+    file = str_c(
+      here(),
+      "data",
+      "derived_data",
+      "nfcore_ATAC_op19",
+      "design.csv",
+      sep = "/"
+    ),
+    na = ""
+  )
+```
+
+The results for the nf-core RNA-seq pipeline will be stored here:
+```{r}
+str_c(here(), "data", "derived_data", "nfcore_ATAC_op19", sep = "/")
+```
+
+
+The `custom.config` is empty 
+```{r}
+write_lines(
+  "",
+file = str_c(
+  here(),
+  "data",
+  "derived_data",
+  "nfcore_ATAC_op19",
+  "custom.config",
+  sep = "/"
+)
+)
+```
+
+(Note that the slurm command needs to be run from the following directory: `/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19`).
+
+Note we ran the pipeline with `--broad` option (note that using `-resume` avoids running the whole pipeline).
+```{r}
+slurm_cmd <-
+  str_c(
+    "sbatch -c 1 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir, "nf_core_ATAC_op19.log", sep = "/"),
+    "--error",
+    str_c(log_dir, "nf_core_ATAC_op19_error.log", sep = "/"),
+    str_c(scripts_dir, "4-1a.Run_nfcore_ATAC_op19.sh", sep = "/"),
+    sep = " "
+  ) 
+
+slurm_cmd
+```
+
