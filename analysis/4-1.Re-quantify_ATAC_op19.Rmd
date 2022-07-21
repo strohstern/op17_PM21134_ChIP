@@ -1,5 +1,5 @@
 ---
-title: "op29 - Re-quantification of ATAC-seq"
+title: "op19 - Re-quantification of ATAC-seq"
 subtitle: ""
 author: "Stephanie Strohbuecker"
 output:
@@ -7,11 +7,7 @@ output:
     df_print: paged
 ---
 
-```{r, eval=FALSE, include=FALSE}
-rmarkdown::render("/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/3-1.ABC_algorithm.Rmd", output_file = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/vignettes/3-1.ABC_algorithm.html")
-```
-
-Identification of differential accessibility analysis (ATAC-seq) between genotypes using as input the provided set of peaks from wild-type neurons.
+Re-run the nf-core ATAC pipeline.
 
 
 ```{r global_options, include=FALSE}
@@ -258,6 +254,10 @@ sample_info <- left_join(sample_info, fastq_files, by = "Sample_limsid")
 sample_info
 ```
 
+```{r, eval=TRUE}
+sample_info %>%
+  write_tsv(str_c(output_dirs[["Tables"]], "ATAC_seq_op19_sample_information.tsv", sep = "/"))
+```
 
 To run read alignment using the ATAC nf-core pipeline, we need to prepare a samplesheet with the following columns:
 

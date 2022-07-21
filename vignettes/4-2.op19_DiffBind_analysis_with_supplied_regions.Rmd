@@ -1,0 +1,473 @@
+---
+title: "op19 - Re-quantification of ATAC-seq"
+subtitle: ""
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+Re-run the nf-core ATAC pipeline.
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+# Project summary
+
+(taken from the project proposal form)
+    
+"
+An initial ATAC-seq experiment (Lims ID PM19276, run  200120_K00102_0447_AHFVFTBBXY) was carried out and Harshil Patel performed the peak calling and differential accessibility analysis. From this experiment, we were particularly interested in the following comparisons:
+1) NP_WT vs NRS_WT
+2) NRS_ASCL1_KO vs NRS_WT
+
+A second ATAC-seq experiment  (Lims ID PM21132, run  210723_A01366_0037_BH2NLTDMXY) was carried out and Miriam Iloriansopena performed the peak calling and differential accessibility analysis. From this experiment, we were particularly interested in the following comparisons:
+1) 48h_DMSO vs WT
+2) 48h_BRM014 vs 48h_DMSO
+3) 48h_BRM014 vs WT
+
+While some of the samples were unique to each of the two experiments, the WT samples come from the same cells (human iPSC-derived neuronal cells at day 24 post neural induction). However, we noticed approximately 55,000 accessible regions in the consensus set of peaks in WT cells from experiment 1, and only approximately 33,000 accessible regions in the consensus set of peaks in WT cells from experiment 2. Since ultimately we are interested in the regions which loose accessibility in both ASCL1_KO and BMR014 mutants relative to the WT cells, we find this discrepancy in their relative WT controls unexpected. Having a closer look at specific genomic regions, we concluded that, most likely, this discrepancy comes from the different signal to noise ratios in the two experiments. More specifically, two of the three wild-type replicates we provided as wild-type samples in the second experiment seem to have a lower signal to noise ration when compared to the third one from the same experiment, or with the other two wild-type replicates from the first experiment. 
+
+Therefore, we would like to generate a consensus set of peaks from the two experiments and use them for the downstream differential accessibility analysis. To be able to carry on the analysis described above, I swiched to “—min_reps_consensus 1” for both experiments (since most likely the discrepancy between the two experiments came from the weak signal to noise ratio in the two replicates from the second experiment). I then overlapped the wild-type peaks from both experiments (1bp overlap) and generate what we will now call the consensus set of peaks for the wild-type samples (called “wt_nrs_consensus_peaks.txt”).
+
+After further discussions with Miram Llorian Sopena, I also used the same criteria (“—min_reps_consensus 1”) to generate new consensus sets of peaks for all the other genotypes. 
+
+Using the provided sets of consensus peaks and specifically only for the peaks identified in the wt neurons (“wt_nrs_consensus_peaks.txt”), I would like to ask for differential accessibility analysis for the following comparisons: 
+
+1) –  wt progenitors (“wt_np_consensus_peaks.txt”) vs  wt neurons (“wt_nrs_consensus_peaks.txt”)
+– ascl1ko neurons (“ascl1ko_nrs_consensus_peaks.txt)  vs  wt neurons (“wt_nrs_consensus_peaks.txt”)
+
+Please find the IDs corresponding to the raw data of these samples highlighted in the  attached PM19276 Excel spreadsheet.
+
+2) – 48h dmso neurons (“48h_dmso_nrs_consensus_peaks.txt”) vs wt neurons (“wt_nrs_consensus_peaks.txt”)
+– 48h brm014 neurons (“48h_brm014_nrs_consensus_peaks.txt”) vs wt neurons (“wt_nrs_consensus_peaks.txt”)
+              – 48h brm014 neurons   
+              (“48h_brm014_nrs_consensus_peaks.txt”) vs 48h dmso 
+              neurons (“48h_dmso_nrs_consensus_peaks.txt”)
+
+Please find the IDs corresponding to the raw data of these samples highlighted in the  attached PM21132 Excel spreadsheet.
+"
+
+
+* [ATAC-seq pipeline, version 1.2.1](https://nf-co.re/atacseq/1.2.1) using the option for MACS (default FDR cut-off `-q 0.05`)
+
+The pipelines allow to obtain QC metrics, perform alignment and merging of multiple libraries, filtering and alignment QC. They also allow further analyses including, for example, annotation of obtained peaks.
+
+We aligned against: `Homo_sapiens.GRCh37.75` as that was the genome used for the RNA-seq analysis.
+
+Merge (union) of the consensus peaks that Oana provided.
+
+```{r}
+RMD_file_name <- "4-2.op19_rerun_featureCounts_with_supplied_regions"
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(ggpubr)
+
+library(plyranges)
+library(DiffBind)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+bam_files <-
+  list.files(
+    here(
+      "data",
+      "derived_data",
+      "nfcore_ATAC_op19",
+      "results",
+      "bwa",
+      "mergedLibrary"
+    ),
+    pattern = ".bam$",
+    full.names = TRUE
+  ) %>% 
+  set_names(str_remove(basename(.), ".mLb.clN.sorted.bam")) %>%
+  enframe(name = "SampleID", "bamReads") 
+  
+
+peak_files <-
+  list.files(
+    here("data", "raw_data", "op19_peak_files"),
+    pattern = "exp.*consensus_peaks.txt",
+    full.names = TRUE
+  ) %>% 
+  set_names(str_remove(basename(.), ".consensus_peaks.txt"))
+
+macs_peak_files <-
+  list.files(
+    here(
+      "data",
+      "derived_data",
+      "nfcore_ATAC_op19",
+      "results",
+      "bwa",
+      "mergedLibrary",
+      "macs",
+      "broadPeak"
+    ),
+    pattern = ".xls",
+    full.names = TRUE
+  ) %>%
+  set_names(str_remove(basename(.), ".mLb.clN_peaks.xls")) %>%
+  enframe(name = "SampleID", "Peaks")
+
+sample_info <-
+  read_tsv(
+    here(
+      "data",
+      "derived_data",
+      "Tables",
+      "4-1.Re-quantify_ATAC_op19",
+      "ATAC_seq_op19_sample_information.tsv"
+    )
+  ) %>% 
+  select(Sample_limsid, group, replicate, Sample_Genotype, project_lims, Sample_Name) %>% 
+  distinct() %>% 
+  mutate(SampleID = str_c(project_lims, "_R", replicate, "_", Sample_Genotype, sep = ""),
+         Sample_Genotype = str_replace_all(Sample_Genotype, " ", "_"),
+         PeakCaller = "macs",
+         Treatment = case_when(
+           str_detect(group, "NP") ~ "NP",
+           TRUE ~ "NRS"
+         )) %>% 
+  left_join(macs_peak_files, by = "SampleID") %>% 
+  left_join(bam_files, by = "SampleID") %>% 
+  group_by(project_lims) %>% 
+  group_split() %>% 
+  set_names(map(., ~ unique(.x$project_lims)))
+
+output_dirs <-
+  str_c(
+    here(),
+    "data/derived_data",
+    c("Tables", "R_objects", "Figures"),
+    RMD_file_name,
+    sep = "/"
+  ) %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+       generate_directories(.x))
+```
+
+
+Oana Paun further specified the analysis goals as follows:
+"
+There is one set of wt peaks, which I would like to use for both experiments (called 'common_exp1and2_wt_nrs_consensus peaks.txt'). Of course, these peaks need separate quantification for each of the two experiments to control for the different signal to noise ratios.
+
+Experiment 1: Lims ID PM19276, run 200120_K00102_0447_AHFVFTBBXY. Please perform differential accessibility analysis between the following pairs:
+
+* 'common_exp1and2_wt_nrs_consensus peaks' and 'exp1_wt_np_consensus_peaks'
+* 'common_exp1and2_wt_nrs_consensus peaks' and 'exp1_ascl1ko_nrs_consensus_peaks'
+
+Experiment 2: Lims ID PM21132, run 210723_A01366_0037_BH2NLTDMXY. Please perform differential accessibility analysis between the following pairs:
+
+* 'common_exp1and2_wt_nrs_consensus peaks' and 'exp2_48h_dmso_nrs_consensus_peaks'
+* 'common_exp1and2_wt_nrs_consensus peaks' and 'exp2_48h_brm014_nrs_consensus_peaks'
+* 'exp2_48h_dmso_nrs_consensus_peaks' and 'exp2_48h_brm014_nrs_consensus_peaks'
+"
+
+Using the peak files Oana paun supplied, we re-quantified the number of reads in the supplied peak regions based on the bam files generated by the nf-core ATAC pipline. For re-quantification we used [subread featureCounts](http://subread.sourceforge.net/featureCounts.html) version 2.0.0.
+
+Based on the supplied peak files we generate gtf annotation files.
+```{r}
+peak_gr <- map(peak_files, function(peak_file) {
+  read_tsv(
+    peak_file,
+    col_names = c(
+      "PeakID",
+      "Chr",
+      "start",
+      "end",
+      "strand",
+      "Peak.Score",
+      "Focus.Ratio.Region.Size",
+      "Annotation",
+      "Detailed.Annotation",
+      "Distance.to.TSS",
+      "Nearest.PromoterID"
+    ), skip = 1
+  ) %>% 
+  mutate(seqnames = str_remove(Chr, "chr")) %>% 
+    select(-Chr) %>% 
+    as_granges()
+})
+```
+
+In order to allow for the comparison between accessibility for the above specified peak regions we merge the supplied peak files according to the two experiments, i.e. we get the union of all peaks across the conditions within each experiment:
+
+* Experiment 1 (PM19276):
+    - common_exp1and2_wt_nrs_consensus peaks
+    - exp1_wt_np_consensus_peaks
+    - exp1_ascl1ko_nrs_consensus_peaks
+* Experiment 2 (PM21132):
+    - common_exp1and2_wt_nrs_consensus peaks
+    - exp2_48h_dmso_nrs_consensus_peaks
+    - exp2_48h_brm014_nrs_consensus_peaks
+
+```{r}
+exp_gr <- list(
+  "PM19276" = peak_gr %>%
+    keep(str_detect(names(.), "common|exp1")),
+  "PM21132" = peak_gr %>%
+    keep(str_detect(names(.), "common|exp2"))
+)
+```
+
+```{r}
+exp_gr <- imap(exp_gr, function(peaks_gr, exper){
+  peaks_gr %>% 
+    purrr::reduce(union) %>% 
+    mutate(peak_id = str_c(exper, "peak", rep(1:length(.)), sep = "_"))
+})
+```
+
+
+```{r}
+sample_info <- sample_info %>%
+  map(
+    ~ .x %>%  select(
+      SampleID,
+      Tissue = project_lims,
+      Factor = group,
+      Condition = Sample_Genotype,
+      Treatment,
+      Replicate = replicate,
+      bamReads,
+      Peaks, 
+      PeakCaller
+    )
+  )
+
+```
+
+```{r include=FALSE}
+dba_ls <- map(sample_info, function(sample_sheet){
+  dba_obj <- dba(sampleSheet = sample_sheet,
+    minOverlap = 0)
+  dba_obj
+})
+
+```
+
+```{r}
+dba_ls <- map(dba_ls, function(dba_obj) {
+  dba_obj$config$doGreylist  <- FALSE
+  dba_obj$config$doBlacklist <- FALSE
+  dba_obj$config$cores <- 6
+  dba_obj
+})
+```
+
+
+Counting is performed against the consensus peak defined by the peak sets Oana Paun identified for each experiment (i.e PM19276 or PM21132). The bam files should already be filterd for duplicates (during the nf-core run).
+```{r include=FALSE}
+dba_ls <- imap(dba_ls, function(dba_obj, exper){
+  dba_obj <- dba.count(dba_obj, peaks = exp_gr[[exper]], summits = FALSE, filter = 0)
+})
+```
+
+```{r}
+write_rds(dba_ls, file = str_c(output_dirs[["R_objects"]], "dba_count_object.RDS", sep = "/"), compress = "gz")
+```
+
+```{r}
+dba_ls <- read_rds(file = str_c(output_dirs[["R_objects"]], "dba_count_object.RDS", sep = "/"))
+```
+
+As enrichment in ATAC-seq is expected to occur over relatively narrow intervals (roughly 100-600bp), it is expected that there should not be systematic differences in signals over much larger intervals (on the order of 10000bp and greater). Any differences seen should be technical rather than biological, so we can normalise based on these differences. This background normalisation is recommended for ATAC-seq analysis ([DiffBind vignette](https://bioconductor.org/packages/release/bioc/vignettes/DiffBind/inst/doc/DiffBind.pdf)).
+
+```{r include=FALSE}
+# Normalise data
+dba_ls <- map(dba_ls, function(dba_obj) {
+  dba_obj <- dba.normalize(dba_obj, background = TRUE)
+})
+```
+
+```{r}
+# Plot sample relationships after normalisation
+map(dba_ls, function(dba_obj) {
+  plot(dba_obj)
+})
+```
+
+
+```{r}
+# generate table of normalised abundancies with
+imap(dba_ls, function(dba_obj, dba_name) {
+  left_join(
+    dba.peakset(dba_obj, bRetrieve = TRUE) %>%
+      as_tibble() %>%
+      select(-strand),
+    exp_gr[[dba_name]] %>% as_tibble(),
+    by = c("seqnames", "start", "end", "width")
+  ) %>%
+    relocate(strand, .after = width) %>%
+    relocate(peak_id, .after = strand) %>%
+    write_tsv(
+      str_c(
+        output_dirs[["Tables"]],
+        "/",
+        dba_name,
+        "_consensus_peak_set_normalised_counts_DiffBind.tsv"
+      )
+    )
+})
+```
+
+# Perform differential accessibility analysis
+
+```{r include=FALSE}
+# set contrasts
+dba_ls <- map(dba_ls, function(dba_obj) {
+  dba_obj <-
+    dba.contrast(dba_obj, categories = DBA_CONDITION,
+                 minMembers = 2)
+})
+```
+
+```{r}
+# map(dba_ls, function(dba_obj) {
+#     dba.show(dba_obj, bContrasts = TRUE)
+# })
+```
+
+
+```{r include=FALSE}
+dba_ls_DESeq2 <- map(dba_ls, function(dba_obj) {
+  dba_obj <-
+    dba.analyze(dba_obj, bParallel = FALSE, method=DBA_DESEQ2)#, bRetrieveAnalysis = TRUE)
+})
+```
+
+```{r}
+## The warning that dba.analyze generated "system is singular" let to the investigation of the dispersion estiamtes. They look resonable, we therefore ignored the warning.
+# plotDispEsts(dba_ls_DESeq2$PM19276)
+```
+
+```{r}
+imap(dba_ls, function(dba_obj, dba_name) {
+    dba.show(dba_obj, bContrasts = TRUE) %>% 
+    as_tibble()
+})
+```
+
+```{r}
+imap(dba_ls, function(dba_obj, dba_name) {
+    dba.show(dba_obj, bContrasts = TRUE) %>% 
+    as_tibble() %>% 
+    mutate(LIMS_ID = dba_name)
+}) %>% 
+  purrr::reduce(bind_rows)
+```
+
+
+```{r}
+dba_res <- imap(dba_ls, function(dba_obj, dba_name) {
+  avail_contr <-  dba.show(dba_obj, bContrasts = TRUE) %>%
+    as_tibble() %>%
+    mutate(comparison = str_c(Group, "vs", Group2, sep = "_"))
+  map(1:NROW(avail_contr), function(contr_nb) {
+    current_contr <- avail_contr[contr_nb,]
+    if (current_contr$DB.DESeq2 != 0) {
+      # with read counts adjusted by the normalisation factors for calculating concentration values; fold changes are reported using the potentially shrunk values
+      #concentration - mean (log) reads across all samples in both groups
+      # Fold – mean fold difference of binding affinity of group 1 over group 2 (Conc1 - Conc2). Absolute value indicates magnitude of the difference, and sign indicates which one is bound with higher affinity, with a positive value indicating higher affinity in the first group
+      dba.report(
+        dba_obj,
+        contrast = contr_nb,
+        th = 0.05,
+        bNormalized = TRUE
+      ) %>%
+        as_tibble() %>%
+        mutate(contrast = current_contr$comparison) %>%
+        as_granges()
+    }
+  }) %>%
+    set_names(map(., ~ unique(.$contrast))) %>%
+    compact()
+}) 
+```
+
+```{r message=FALSE, warning=FALSE}
+imap(dba_res, function(dba_res_obj, res_name) {
+  openxlsx::write.xlsx(dba_res_obj, str_c(
+    output_dirs[["Tables"]],
+    str_c(
+      res_name,
+      "differentially_accessible_peaks_ATACseq.xlsx",
+      sep = "_"
+    ),
+    sep = "/"
+  ), overwrite = TRUE)
+})
+```
+
+
+```{r, fig.height=6}
+readscores <- imap(dba_ls, function(dba_obj, dba_name) {
+  avail_contr <-  dba.show(dba_obj, bContrasts = TRUE) %>%
+    as_tibble() %>%
+    mutate(comparison = str_c(Group, "vs", Group2, sep = "_"))
+  map(1:NROW(avail_contr), function(contr_nb) {
+    current_contr <- avail_contr[contr_nb, ]
+    if (current_contr$DB.DESeq2 != 0) {
+      readscores <- dba.plotHeatmap(
+        dba_obj,
+        contrast = contr_nb,
+        correlations = FALSE,
+        colScheme = colorRampPalette(c("red", "black", "green"))(n = 13),
+        main = str_replace_all(current_contr$comparison, "_", " ")
+      )
+      readscores
+    }
+  }) %>%
+    set_names(map(., ~ unique(.$contrast))) %>%
+    compact()
+}) 
+```
+
+```{r, fig.height=6}
+dba_profiles <- imap(dba_ls, function(dba_obj, dba_name) {
+  avail_contr <-  dba.show(dba_obj, bContrasts = TRUE) %>%
+    as_tibble() %>%
+    mutate(comparison = str_c(Group, "vs", Group2, sep = "_"))
+  map(1:NROW(avail_contr), function(contr_nb) {
+    current_contr <- avail_contr[contr_nb,]
+    if (current_contr$DB.DESeq2 != 0) {
+      # with read counts adjusted by the normalisation factors for calculating concentration values; fold changes are reported using the potentially shrunk values
+      #concentration - mean (log) reads across all samples in both groups
+      # Fold – mean fold difference of binding affinity of group 1 over group 2 (Conc1 - Conc2). Absolute value indicates magnitude of the difference, and sign indicates which one is bound with higher affinity, with a positive value indicating higher affinity in the first group
+      profiles <- dba.plotProfile(
+        dba_obj, contrast = contr_nb)
+    }
+  }) %>%
+    set_names(map(., ~ unique(.$contrast))) %>%
+    compact()
+}) 
+```
+https://content.cruk.cam.ac.uk/bioinformatics/software/DiffBind/plotProfileDemo.html#default-plot-analysis
+```{r}
+dba.plotProfile(dba_profiles$PM21132[[1]])
+```
+
