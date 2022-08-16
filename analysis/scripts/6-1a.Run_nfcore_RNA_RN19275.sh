@@ -32,7 +32,7 @@ nextflow run nf-core/rnaseq \
     --fasta $GENOME_DIR/genome/Homo_sapiens.GRCh37.75.dna_sm.primary_assembly.fa \
     --gtf $GENOME_DIR/gtf/Homo_sapiens.GRCh37.75.gtf \
     --email stephanie.strohbuecker@crick.ac.uk \
-    --outdir $DATA_DIR/derived_data/nfcore_RNA/ \
+    --outdir $DATA_DIR/derived_data/nfcore_RNA_RN19275/ \
     -profile crick \
     -r 3.7 \
     -resume

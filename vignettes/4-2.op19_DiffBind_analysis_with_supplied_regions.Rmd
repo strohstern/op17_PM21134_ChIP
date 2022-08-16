@@ -484,6 +484,47 @@ iwalk(dba_res, function(dba_res_obj, res_name) {
 })
 ```
 
+```{r}
+dba_all <- imap(dba_ls, function(dba_obj, dba_name) {
+  avail_contr <-  dba.show(dba_obj, bContrasts = TRUE) %>%
+    as_tibble() %>%
+    mutate(comparison = str_c(Group, "vs", Group2, sep = "_"))
+  map(1:NROW(avail_contr), function(contr_nb) {
+    current_contr <- avail_contr[contr_nb,]
+    if (current_contr$DB.DESeq2 != 0) {
+      # with read counts adjusted by the normalisation factors for calculating concentration values; fold changes are reported using the potentially shrunk values
+      #concentration - mean (log) reads across all samples in both groups
+      # Fold – mean fold difference of binding affinity of group 1 over group 2 (Conc1 - Conc2). Absolute value indicates magnitude of the difference, and sign indicates which one is bound with higher affinity, with a positive value indicating higher affinity in the first group
+      dba.report(
+        dba_obj,
+        contrast = contr_nb,
+        th = 1,
+        bNormalized = TRUE
+      ) %>%
+        as_tibble() %>%
+        mutate(contrast = current_contr$comparison) %>%
+        as_granges()
+    }
+  }) %>%
+    set_names(map(., ~ unique(.$contrast))) %>%
+    compact()
+}) 
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+iwalk(dba_all, function(dba_res_obj, res_name) {
+  openxlsx::write.xlsx(dba_res_obj, str_c(
+    output_dirs[["Tables"]],
+    str_c(
+      res_name,
+      "all_accessible_peaks_ATACseq.xlsx",
+      sep = "_"
+    ),
+    sep = "/"
+  ), overwrite = TRUE)
+})
+```
+
 ```{r message=FALSE, warning=FALSE}
 dba_res_comb <-
   imap(dba_ls, function(dba_obj, dba_name) {
@@ -536,26 +577,28 @@ imap_dfr(dba_res, function(dba_res_obj, dba_name) {
   DT::datatable(caption = "Number of peaks gained or lost in the indicated comparison")
 ```
 
-Oana Paun noticed that, against expectations, the number of more accessible peaks seems to increase in the ASCL1-KO in comparison to wildtype conditions (in experiment PM19276). We investigated if there is a difference in the effect size in those regions that gain accessibility in ASCL1-KO conditions.
-```{r}
-imap(dba_res, function(dba_res_obj, dba_name) {
-  imap(dba_res_obj, function(peak_ls, comp_name) {
-   peak_ls %>% 
-      as_tibble() %>%
-      mutate(direct = case_when(Fold > 0 ~ "Gain",
-                                Fold < 0 ~ "Loss")) %>% 
-      # filter(abs(Fold) > 0.5) %>%
-      ggplot(aes(abs(Fold), colour = direct)) +
-      geom_density() +
-      ggtitle(comp_name)
-  }) %>% 
-    ggarrange(plotlist = .) %>% 
-    annotate_figure(top = dba_name)
-}) 
-```
-Visualising the absolute LFC of the provided peak regions we can identify a proportion of peaks that show gain accessibility but at a smaller effect size (< 0.5). This indicates that if a filter is applied to the effect size, a larger proportion of peak regions that gain accessibility is filtered out (a smaller proportion of peaks that loose accessibility is filtered out). Nonetheless as there is a considerably higher number of peaks that gain accessibility, there will still be a higher number of peaks that gain accessibility.
 
 ```{r}
+# # Oana Paun noticed that, against expectations, the number of more accessible peaks seems to increase in the ASCL1-KO in comparison to wildtype conditions (in experiment PM19276). We investigated if there is a difference in the effect size in those regions that gain accessibility in ASCL1-KO conditions.
+# imap(dba_res, function(dba_res_obj, dba_name) {
+#   imap(dba_res_obj, function(peak_ls, comp_name) {
+#    peak_ls %>% 
+#       as_tibble() %>%
+#       mutate(direct = case_when(Fold > 0 ~ "Gain",
+#                                 Fold < 0 ~ "Loss")) %>% 
+#       # filter(abs(Fold) > 0.5) %>%
+#       ggplot(aes(abs(Fold), colour = direct)) +
+#       geom_density() +
+#       ggtitle(comp_name)
+#   }) %>% 
+#     ggarrange(plotlist = .) %>% 
+#     annotate_figure(top = dba_name)
+# }) 
+```
+
+
+```{r}
+## Visualising the absolute LFC of the provided peak regions we can identify a proportion of peaks that show gain accessibility but at a smaller effect size (< 0.5). This indicates that if a filter is applied to the effect size, a larger proportion of peak regions that gain accessibility is filtered out (a smaller proportion of peaks that loose accessibility is filtered out). Nonetheless as there is a considerably higher number of peaks that gain accessibility, there will still be a higher number of peaks that gain accessibility.
 # imap_dfr(dba_res, function(dba_res_obj, dba_name) {
 #   imap_dfr(dba_res_obj, function(peak_ls, comp_name) {
 #     sites_of_int <- peak_ls %>%
@@ -645,7 +688,7 @@ readscores <- imap(dba_ls, function(dba_obj, dba_name) {
 }) 
 ```
 
-Information about the used peak set and the significantly differenitally accessible peaks can be downloaded using the links below.
+Information about the used peak set and the significantly differentially accessible peaks and all peaks considered for the differentially expression analysis can be downloaded using the links below.
 
 ```{r}
 excel_files_path <-
