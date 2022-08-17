@@ -1,0 +1,414 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+subtitle: "Analysis of ChIP - QC"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+```{r}
+RMD_file_name <- "0-4.prepare_data_for_ENA_upload"
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r, eval=FALSE}
+sample_info_DN19154 <- readxl::read_excel(
+  here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "DN19154_ExperimentalTable_vs16-08-2022.xlsx"
+  ))
+
+read_csv(here("data", "raw_data", "project_docs", "DN19154_design.csv")) %>%
+  select (fastq_1) %>%
+  mutate(sample_id = str_remove(basename(fastq_1), "_S\\d+_L\\d+_R1_001.fastq.gz")) %>%
+  right_join(sample_info_DN19154, by = c("sample_id" = "LIMS ID")) %>%
+  rename(sample_name = "Sample Name") %>%
+  write_csv(here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "DN19154_design_info_vs16-08-2022.csv"
+  ))
+
+left_join(
+  read_csv(
+    here("data", "derived_data", "nfcore_RNA_RN19275", "design.csv")
+  ),
+  readxl::read_excel(
+    here(
+      "data",
+      "raw_data",
+      "project_docs",
+      "RN19275_006_RNASeq_E5_sampleCounts.xlsx"
+    )
+  ) %>% select(sample_name = Prefix, sample = NGS),
+  by = "sample"
+) %>% 
+  write_csv(here("data", "derived_data", "nfcore_RNA_RN19275", "design_adj.csv"))
+```
+
+
+```{r}
+# Path to output and figures directories
+sample_info <-
+  readxl::read_excel(here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "samples_for_data_upload_vs12-08-2022.xlsx"
+  )) %>% 
+  select(project_id, sample_id, sequencing_type, sequencing_mode, flowcell)
+
+output_dirs <-
+  str_c(here(),
+        "data/derived_data",
+        c("Tables", "R_objects", "Figures"),
+        RMD_file_name,
+        sep = "/") %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+      generate_directories(.x))
+
+log_dir <- here("analysis", "logs")
+scripts_dir <- here("analysis", "scripts")
+tmp_dir <- here("analysis", "tmp")
+bam_links_dir <- here(output_dirs[["Tables"]], "bam_links")
+filtered_bam_dir <- here(output_dirs[["Tables"]], "filtered_bam")
+fastq_links_dir <- here(output_dirs[["Tables"]], "fastq_links")
+filtered_fastq_dir <- here(output_dirs[["Tables"]], "filtered_fastq")
+
+walk(c(tmp_dir, bam_links_dir, filtered_bam_dir, fastq_links_dir, filtered_fastq_dir), ~
+      generate_directories(.x))
+```
+
+
+```{r, eval=FALSE}
+# this generates a bedfile based on the faix index removing the Y chromosome (to use with samtools view)
+read_tsv(
+  here(
+    "data",
+    "raw_data",
+    "genome_file_ABC",
+    "Homo_sapiens.GRCh37.75.dna_sm.primary_assembly.chrom_sizes"
+  ),
+  col_names = c("seqnames", "end")
+) %>%
+  mutate(start = 1) %>% 
+  select(seqnames, start, end) %>% 
+  filter(seqnames != "Y") %>% 
+  arrange(desc(end)) %>% 
+  write_tsv(here(output_dirs[["Tables"]], "chrom_no_chrY.bed"), col_names = FALSE)
+```
+
+
+```{r}
+design_file_locs <- c(
+  "DN19154" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/raw_data/project_docs/DN19154_design_info_vs16-08-2022.csv",
+  "RN19275" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA_RN19275/design_adj.csv",
+  "PM19276" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19/design.csv",
+  "RN21133" = "/camp/stp/babs/working/gerontl/projects/guillemotf/Oana.Paun/RN21133/docs/asf_samplesheet.csv",
+  "PM21132" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19/design.csv",
+  "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/design.csv",
+  "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/sr-design.csv",
+  "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/design.csv",
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/design.csv"
+) %>%
+  enframe(name = "project_id", value = "design_file_loc")
+```
+
+```{r}
+results_dir_locs <- c(
+  "DN19154" = "/camp/stp/babs/inputs/guillemotf/oana.paun/stephanie.strohbuecker/op17_PM21134_ChIP_SWI_SNFxASCL1/DN19154",
+  "RN19275" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA_RN19275/star_rsem",
+  "PM19276" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19",
+  "RN21133" = "/camp/stp/babs/working/gerontl/projects/guillemotf/Oana.Paun/RN21133/nfcore",
+  "PM21132" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19",
+  "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/results",
+  "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/results",
+  "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/results",
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP"
+) %>%
+  enframe(name = "project_id", value = "results_dir")
+```
+
+```{r}
+design_file_locs <- full_join(design_file_locs, results_dir_locs, by = "project_id")
+```
+
+```{r}
+# design_file_locs <- design_file_locs %>%
+#   filter(project_id != "RN19275")
+```
+
+```{r}
+meta_data <-
+  design_file_locs %>%
+  group_by(project_id) %>%
+  group_split() %>%
+  set_names(map(., ~ unique(.x$project_id))) %>%
+  imap(function(file_loc_df, project_name) {
+    sample_ids <- sample_info %>%
+      filter(project_id == project_name) %>%
+      pull(sample_id)
+
+    bam_files_loc <-     list.files(
+      file_loc_df$results_dir,
+      pattern = ".bam$",
+      recursive = TRUE,
+      full.names = TRUE
+    ) %>%
+      set_names(str_remove(basename(.), "\\..*$")) %>%
+      enframe(name = "sample_name", value = "bam_file_loc")
+
+    design_df <- read_csv(file_loc_df$design_file_loc) %>%
+      rename(any_of(c("fastq_1"  = "file"))) %>%
+      mutate(sample_id = str_remove(basename(fastq_1), "_S.*")) %>%
+      distinct() %>%
+      filter(sample_id %in% sample_ids) %>%
+    {
+      if (str_detect(project_name, "PM")) {
+        mutate(., sample_name = str_c(group, "_R", replicate, sep = "")) %>%
+          left_join(bam_files_loc, by = "sample_name")
+      } else if (str_detect(project_name, "RN")) {
+        left_join(., bam_files_loc, by = c("sample" = "sample_name"))
+      } else {
+        left_join(., bam_files_loc, by = "sample_name")
+      }
+    }  %>% 
+    mutate(new_bam_file_name = str_c(bam_links_dir, basename(bam_file_loc), sep = "/"))
+  })
+```
+
+
+```{r, eval=FALSE}
+# make symbolic links to the bam files for which Y-chromosome information needs to be removed
+map(meta_data, function(project_df) {
+  project_df %>%
+    select(bam_file_loc, new_bam_file_name) %>%
+    distinct() %>% 
+    deframe() %>%
+    imap( ~ {
+      bash_cmd <- str_c("ln -s", .y, .x, sep = " ")
+      bash_cmd
+      system(bash_cmd)
+    })
+})
+```
+
+```{r, eval=FALSE}
+# make symbolic links to the bam.bai files for which Y-chromosome information needs to be removed (to enable filtering for reads on the Y chromosome)
+map(meta_data, function(project_df) {
+  project_df %>%
+    select(bam_file_loc, new_bam_file_name) %>%
+    mutate(bam_file_loc = str_c(bam_file_loc, "bai", sep = "."),
+           new_bam_file_name = str_c(new_bam_file_name, "bai", sep = ".")) %>% 
+    distinct() %>% 
+    deframe() %>%
+    imap( ~ {
+      bash_cmd <- str_c("ln -s", .y, .x, sep = " ")
+      bash_cmd
+      system(bash_cmd)
+    })
+})
+```
+
+For submission of their paper Oana Paun's data from a range of projects needs to be uploaded to make the underlying data publicly available. 
+The MTA associated with the cell line that was used throughout requires the removal of any information associated with the Y chromosome from the sequencing information.
+To the end we will remove the Y chromosome information from the bam files. Subsequently, the "cleaned" bam files will be made available publicly.
+
+```{r}
+filter_bam_chrY_sample <- map_dfr(meta_data, function(project_df) {
+  project_df %>%
+    mutate(
+      filtered_read_names = str_c(filtered_bam_dir, sample_name, sep = "/") %>%
+        str_c(".chrY_filtered")
+    ) %>%
+    select(new_bam_file_name, filtered_read_names)
+}) %>%
+  # slice(1) %>%
+  write_delim(str_c(tmp_dir,
+                    "filter_bam_chrY_sample_file.txt",
+                    sep = "/"),
+              col_names = FALSE)
+```
+
+```{r}
+# If using onDemand copy the following slurm command to the terminal to run:
+slurm_cmd <-
+  str_c(
+    "sbatch -c 8 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir,
+          "0-4b.filter_bam_chrY_%A_%a.log",
+          sep = "/"),
+    "--error",
+    str_c(log_dir,
+          "0-4b.filter_bam_chrY_error_%A_%a.log",
+          sep = "/"),
+    "--array",
+    str_c(1, "-", NROW(filter_bam_chrY_sample), sep = ""),
+    str_c(scripts_dir,
+          "0-4a.slurm_array.sh",
+          sep = "/"),
+    str_c(
+      tmp_dir,
+      "filter_bam_chrY_sample_file.txt",
+      sep = "/"
+    ),
+    str_c(scripts_dir,
+          "0-4b.filter_bam_chrY.sh",
+          sep = "/"),
+    
+    sep = " "
+  )
+
+slurm_cmd
+# system(slurm_cmd) # this should work when not using onDemand
+```
+
+```{bash, eval=FALSE}
+# Example command used for removing chrY reads (keep reads on all other chromosomes)
+samtools view --threads 6 -h -L $bed_file -o $output_bam $input_bam
+
+# using the BBmap approach we get the read names of those reads that map to the Y chromosome
+samtools view --threads 6 $input_bam 'Y'| cut -f 1  > ${output}.read.names.txt
+```
+
+With access to the fastq raw data files, we can extract those reads which names are in a list of read names with, e.g. [seqtk](https://github.com/lh3/seqtk).
+```{bash, eval=FALSE}
+# using the BBmap approach but this could be an alternative
+ seqtk subseq in.fq name.lst > out.fq
+```
+
+or [BBTools](https://jgi.doe.gov/data-and-tools/software-tools/bbtools/) `filterbyname.sh` function
+```{bash, eval=FALSE}
+filterbyname.sh in=<file> in2=<file2> out=<outfile> out2=<outfile2> names=<string,string,string> include=<t/f>
+```
+
+```{r}
+BBmap_sample <-
+  meta_data %>%
+  imap_dfr(function(sample_df, project_id) {
+    pro <-  project_id
+    seq_mode <- sample_info %>%
+      filter(project_id == pro) %>%
+      pull(sequencing_mode) %>%
+      unique()
+    sample_df %>%
+      select(contains("fastq"), sample_name) %>%
+      group_by(sample_name) %>%
+      {
+        if (!("fastq_2" %in% names(.))) {
+          mutate(., fastq_2 = NA_character_)
+        } else {
+          .
+        }
+      } %>%
+      mutate(
+        filtered_read_names = str_c(filtered_bam_dir, sample_name, sep = "/") %>%
+          str_c(".chrY_filtered.read.names.txt"),
+        fastq_new_name = str_c(
+          filtered_fastq_dir,
+          project_id,
+          str_c(sample_name, str_c("lane", rep(1:n(
+            
+          )), sep = ""), sep = "_"),
+          sep = "/"
+        ),
+        fastq_2 = as.character(fastq_2),
+        fastq_2 = case_when(
+          seq_mode == "Paired-end" ~ fastq_2,
+          seq_mode == "Single-end" ~ NA_character_
+        )#,
+        # fastq_1 = basename(fastq_1),
+        # fastq_2 = basename(fastq_2),
+        # filtered_read_names = basename(filtered_read_names)
+      ) %>%
+      ungroup() %>%
+      select(filtered_read_names, fastq_new_name, contains("fastq_")) %>%
+      discard( ~ all(is.na(.x)))
+  }) %>%
+  # slice(1, 25) %>%
+  write_delim(str_c(tmp_dir,
+                    "BBmap_sample_file.txt",
+                    sep = "/"),
+              col_names = FALSE)
+```
+
+
+```{r}
+BBmap_sample %>% 
+  pull(fastq_new_name) %>% 
+  dirname() %>% 
+  walk( ~
+      generate_directories(.x))
+```
+
+
+```{r}
+# If using onDemand copy the following slurm command to the terminal to run:
+slurm_cmd <-
+  str_c(
+    "sbatch -c 8 --mem-per-cpu 7G -N 1 --time 16:00:00 --output",
+    str_c(log_dir,
+          "0-4c.bbmap_filterbyname_%A_%a.log",
+          sep = "/"),
+    "--error",
+    str_c(log_dir,
+          "0-4c.bbmap_filterbyname_error_%A_%a.log",
+          sep = "/"),
+    "--array",
+    str_c(1, "-", NROW(BBmap_sample), sep = ""),
+    str_c(scripts_dir,
+          "0-4a.slurm_array.sh",
+          sep = "/"),
+    str_c(
+      tmp_dir,
+      "BBmap_sample_file.txt",
+      sep = "/"
+    ),
+    str_c(scripts_dir,
+          "0-4c.bbmap_filterbyname.sh",
+          sep = "/"),
+    
+    sep = " "
+  )
+
+slurm_cmd
+# system(slurm_cmd) # this should work when not using onDemand
+```
+
+
+
+
+
+
+
+
+
+
+
+
