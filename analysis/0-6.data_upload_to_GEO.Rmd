@@ -1,0 +1,243 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+subtitle: "Data upload to GEO"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+Prepare metadata and files for upload to GEO.
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+```{r}
+RMD_file_name <- "0-5.data_upload_to_GEO"
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+sample_info <-
+  readxl::read_excel(
+    here(
+      "data",
+      "raw_data",
+      "project_docs",
+      "samples_for_data_upload_vs12-08-2022.xlsx"
+    )
+  ) %>%
+  select(project_id, sample_id, sequencing_type, sequencing_mode) %>%
+  mutate(instrument_model = case_when(
+    project_id %in% c("DN19154", "PM19276", "RN19275") ~ "HiSeq4000",
+    project_id %in% c(
+      "PM21132",
+      "PM21134",
+      "PM22148",
+      "PM22149",
+      "PM22166",
+      "RN21133"
+    ) ~ "NovaSeq6000"
+  ))
+
+meta_data <- read_rds(
+  here(
+    "data",
+    "derived_data",
+    "R_objects",
+    "0-4.prepare_data_for_ENA_upload",
+    "metadata_for_upload.RDS"
+  )
+)
+
+GEO_dirs <-
+  str_c(here("data", "derived_data", "GEO"),
+        unique(sample_info$sequencing_type),
+        sep = "/") %>%
+  set_names(unique(sample_info$sequencing_type))
+
+walk(GEO_dirs, ~ generate_directories(.x))
+```
+
+```{r}
+iwalk(GEO_dirs, ~ file.copy(
+  here("data", "raw_data", "project_docs", "GEO_seq_template-1.xlsx"),
+  str_c(.x, str_c(.y, "GEO_seq_template-1.xlsx", sep = "_"), sep = "/")
+))
+```   
+
+
+```{r}
+meta_data <- imap(meta_data, function(meta_df, projectID){
+  sam_df <- sample_info %>% 
+    filter(project_id == projectID)
+  left_join(meta_df, sam_df, by = "sample_id"
+) %>% 
+    distinct()
+  })
+```
+
+
+```{r}
+fastq_dirs <-
+  here(
+    "data",
+    "derived_data",
+    "Tables",
+    "0-4.prepare_data_for_ENA_upload",
+    "filtered_fastq"
+  )
+
+
+fastq_info <- list.files(
+  fastq_dirs,
+  pattern = "fastq.gz",
+  recursive = TRUE,
+  full.names = TRUE
+) %>%
+  set_names(str_remove(basename(.), "_lane\\d.*.gz$")) %>%
+  enframe(name = "sample_name", value = "fastq_loc") %>%
+  mutate(project_id = dirname(fastq_loc) %>% basename())
+
+meta_data <-
+  map(meta_data, ~ left_join(.x, fastq_info, by = c("sample_name", "project_id")))
+```
+
+```{r}
+meta_data <- map(meta_data,
+        ~ .x %>%
+          # select(sample_name, sequencing_type, project_id) %>%
+          mutate(
+            genotype = case_when(
+              str_detect(sample_name, "WT") ~ "WT",
+              str_detect(sample_name, "KO_") ~ "ASCL1-KO",
+              TRUE ~ "WT"
+            ),
+            treatment = case_when(
+              str_detect(sample_name, "BRM|BRM014") ~ "BRM014",
+              str_detect(sample_name, "DMSO") ~ "DMSO",
+              TRUE ~ NA_character_
+            ),
+            treatment_length = case_when(
+              is.na(treatment) ~ NA_character_,
+              str_detect(sample_name, "48h") ~ "48h",
+              TRUE ~ "48h"
+            ),
+            antibody = case_when(
+              sequencing_type != "ChIP-seq" ~ NA_character_,
+              str_detect(sample_name, "INPUT|Input") ~ "INPUT",
+              str_detect(sample_name, "SMARCB1") ~ "SMARCB1",
+              str_detect(sample_name, "H3K4me3") ~ "H3K4me3",
+              str_detect(sample_name, "H3K27ac") ~ "H3K27ac",
+              str_detect(sample_name, "ASCL1") ~ "ASCL1",
+              TRUE ~ "none"
+            ),
+            time = case_when(
+              str_detect(sample_name, "D20") ~ "day 20",
+              project_id %in% c("DN19154", "PM21134", "PM22166") ~ "day 20",
+              project_id %in% c("PM22148", "PM22149") ~ "day 12",
+              TRUE ~ NA_character_
+            ),
+            differentiation_stage = case_when(
+              str_detect(sample_name, "NP") ~ "neural progenitor",
+              str_detect(sample_name, "NRS") ~ "neuron",
+              TRUE ~ NA_character_
+            )
+          ))
+```
+
+```{r}
+seq_modes <- sample_info %>% 
+  select(project_id, sequencing_type) %>% 
+  distinct() %>% 
+  group_by(sequencing_type) %>% 
+  group_split() %>% 
+  set_names(map(., ~ unique(.x$sequencing_type))) %>% 
+  map(~ pull(., project_id))
+```
+
+```{r}
+meta_data <- map(seq_modes, ~ keep(meta_data, names(meta_data) %in% .x))
+```
+
+```{r, eval=FALSE}
+# move fastq files in correct directory
+imap(meta_data, function(proj_list, seq_mode) {
+  fastq_locs <- map_dfr(proj_list, ~ .x %>% select(fastq_loc)) %>% 
+    mutate(fastq_name = basename(fastq_loc)) %>% 
+    relocate(fastq_name) %>% 
+    deframe()
+
+  imap(fastq_locs, ~ file.rename(.x, here(GEO_dirs[[seq_mode]], .y)))
+})
+```
+
+
+```{r}
+imap(meta_data, function(proj_list, seq_mode) {
+  reduce(proj_list, bind_rows)  %>%
+    mutate(
+      organism = "Homo sapiens",
+      cell_line = "HPSI0114ikolf2-clone1",
+      cell_type = "human induced pluripotent cells",
+      title = str_c(cell_line, genotype, treatment, sep = ", "),
+      molecule = case_when(
+        seq_mode == "RNA-seq" ~ "total RNA",
+        seq_mode %in% c("ChIP-seq", "ATAC-seq") ~ "Genomic DNA"
+      ),
+      single_or_paired_end = str_remove_all(sequencing_mode, "-end") %>%
+        str_to_lower(),
+      description = "",
+      fastq_loc = basename(fastq_loc),
+      
+    ) %>%
+    select(
+      library_name = sample_name,
+      title,
+      organism,
+      any_of(c("sample", "sample_id")),
+      cell_line,
+      cell_type,
+      genotype,
+      treatment,
+      treatment_length,
+      time,
+      differentiation_stage,
+      ChIP_antibody = antibody,
+      molecule,
+      single_or_paired_end,
+      instrument_model,
+      description,
+      # processed_data_file,
+      fastq_loc
+    ) %>%
+    group_by(library_name) %>%
+    mutate(raw_file = str_c("raw_file", rep(1:n()), sep = "_")) %>%
+    pivot_wider(names_from = raw_file, values_from = fastq_loc) %>% 
+    arrange(library_name) %>% 
+    write_csv( here(GEO_dirs[[seq_mode]], "sample_info.csv"))
+})
+```
+
+
+
+
+
+
+

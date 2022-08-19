@@ -1,6 +1,6 @@
 ---
 title: "PM21134 - ChIP of SWI/SNF and ASCL1"
-subtitle: "Analysis of ChIP - QC"
+subtitle: "Filter fastq files to remove Y chromosome reads"
 author: "Stephanie Strohbuecker"
 output:
   html_document:
@@ -204,6 +204,15 @@ meta_data <-
 ```
 
 
+
+
+```{r}
+imap(meta_data, ~ .x %>% 
+       select(-contains("fastq"), -contains("bam"))) %>% 
+  write_rds(here(output_dirs[["R_objects"]], "metadata_for_upload.RDS"))
+```
+
+
 ```{r, eval=FALSE}
 # make symbolic links to the bam files for which Y-chromosome information needs to be removed
 map(meta_data, function(project_df) {
@@ -402,6 +411,27 @@ slurm_cmd
 ```
 
 
+```{r}
+# prepare list of Y-chromosomal reads
+library(plyranges)
+human_gtf <- here("data", "raw_data", "genome_file_ABC", "Homo_sapiens.GRCh37.75.gtf")
+
+hs_gtf <- read_gff(human_gtf)
+
+hs_gtf %>%
+  filter(seqnames == "Y") %>%
+  as_tibble() %>%
+  select(gene_id) %>%
+  distinct() %>%
+  write_tsv(
+    here(
+      "data",
+      "raw_data",
+      "genome_file_ABC",
+      "Homo_sapiens.GRCh37.75.Y_chromosome_genes.gtf"
+    )
+  )
+```
 
 
 

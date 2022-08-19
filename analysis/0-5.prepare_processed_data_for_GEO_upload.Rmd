@@ -1,0 +1,316 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+subtitle: "Filter fastq files to remove Y chromosome reads"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+```{r}
+RMD_file_name <- "0-5.prepare_processed_data_for_GEO_upload"
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(readxl)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+sample_info <-
+  readxl::read_excel(here(
+    "data",
+    "raw_data",
+    "project_docs",
+    "samples_for_data_upload_vs12-08-2022.xlsx"
+  )) %>% 
+  select(project_id, sample_id, sequencing_type, sequencing_mode)
+
+meta_data <- read_rds(
+  here(
+    "data",
+    "derived_data",
+    "R_objects",
+    "0-4.prepare_data_for_ENA_upload",
+    "metadata_for_upload.RDS"
+  )
+)
+
+Ychr_genes <- read_tsv(
+  here(
+    "data",
+    "raw_data",
+    "genome_file_ABC",
+    "Homo_sapiens.GRCh37.75.Y_chromosome_genes.gtf"
+  )
+)
+
+output_dirs <-
+  str_c(here(),
+        "data/derived_data",
+        c("Tables", "R_objects", "Figures"),
+        RMD_file_name,
+        sep = "/") %>%
+  set_names(c("Tables", "R_objects", "Figures"))
+
+walk(output_dirs, ~
+      generate_directories(.x))
+
+processed_files_dir <- here(output_dirs[["Tables"]], "processed_files")
+filtered_processed_files_dir <- here(output_dirs[["Tables"]], "filtered_processed_files")
+
+walk(c(processed_files_dir, filtered_processed_files_dir), ~
+      generate_directories(.x))
+```
+
+```{r}
+results_dir_locs <- c(
+  "DN19154" = "/camp/stp/babs/inputs/guillemotf/oana.paun/stephanie.strohbuecker/op17_PM21134_ChIP_SWI_SNFxASCL1/DN19154",
+  "RN19275" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA_RN19275/star_rsem",
+  "PM19276" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19/results/bwa/mergedLibrary/macs/broadPeak",
+  "RN21133" = "/camp/stp/babs/working/gerontl/projects/guillemotf/Oana.Paun/RN21133/nfcore/GRCh37_75/results/star_rsem",
+  "PM21132" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ATAC_op19/results/bwa/mergedLibrary/macs/broadPeak",
+  "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/results/bwa/mergedLibrary/macs/broadPeak",
+  "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/results/bwa/mergedLibrary/macs",
+  "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/results/bwa/mergedLibrary/macs",
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/results/bwa/mergedLibrary/macs"
+) %>%
+  enframe(name = "project_id", value = "results_dir")
+```
+
+```{r}
+sample_info <- left_join(sample_info, results_dir_locs, by = "project_id")
+```
+
+```{r}
+meta_data <- imap(meta_data, function(meta_df, projectID) {
+  sam_df <- sample_info %>%
+    filter(project_id == projectID)
+  left_join(meta_df, sam_df, by = "sample_id") %>%
+    distinct() %>%
+    mutate(
+      antibody = case_when(
+        sequencing_type != "ChIP-seq" ~ NA_character_,
+        # str_detect(sample_name, "INPUT|Input") ~ "INPUT",
+        str_detect(sample_name, "SMARCB1") ~ "SMARCB1",
+        str_detect(sample_name, "H3K4me3") ~ "H3K4me3",
+        str_detect(sample_name, "H3K27ac") ~ "H3K27ac",
+        str_detect(sample_name, "ASCL1") ~ "ASCL1",
+        TRUE ~ "none"
+      ),
+      peak_calling = case_when(
+        antibody %in% c("H3K4me3", "H3K27ac") ~ "broadPeak",
+        antibody %in% c("ASCL1", "SMARCB1") ~ "narrowPeak",
+        TRUE ~ NA_character_
+      )
+    )
+})
+```
+
+```{r}
+seq_modes <- sample_info %>% 
+  select(project_id, sequencing_type) %>% 
+  distinct() %>% 
+  group_by(sequencing_type) %>% 
+  group_split() %>% 
+  set_names(map(., ~ unique(.x$sequencing_type))) %>% 
+  map(~ pull(., project_id))
+```
+
+```{r}
+meta_data <- map(seq_modes, ~ keep(meta_data, names(meta_data) %in% .x))
+```
+
+```{r}
+meta_data <- map_depth(meta_data, 2, ~ .x %>%
+      mutate(processed_files_sym = here(processed_files_dir, sequencing_type, project_id)))
+```
+
+```{r}
+map_depth(meta_data, 2, ~ unique(.x$processed_files_sym)) %>% 
+  reduce(c) %>% 
+  reduce(c) %>% 
+  walk( ~
+      generate_directories(.x))
+```
+
+
+```{r}
+# use information of location of processed files to generate symbolic links via the terminal
+# process_dirs <- imap_dfr(meta_data, function(df_ls, seq_mode) {
+#   if (seq_mode == "RNA-seq") {
+#     res_dir <- map_dfr(df_ls,
+#                        ~ .x %>%
+#                          select(project_id, results_dir, processed_files_sym) %>%
+#                          distinct()) %>%
+#       mutate(file_pattern = "rsem.merged.gene_counts.tsv")
+#   } else if (seq_mode == "ChIP-seq") {
+#     res_dir <- map_dfr(
+#       df_ls,
+#       ~ .x  %>%
+#         select(project_id, results_dir, antibody, peak_calling, processed_files_sym) %>%
+#         distinct() %>%
+#         filter(!is.na(peak_calling)) %>%
+#         mutate(
+#           results_dir = str_c(results_dir,
+#                               peak_calling,
+#                               "consensus",
+#                               sep = "/")
+#         )
+#     ) %>%
+#       select(project_id, results_dir, processed_files_sym) %>%
+#       mutate(file_pattern =  "featureCounts.txt$|consensus_peaks.bed$")
+#   } else if (seq_mode == "ATAC-seq") {
+#     res_dir <- map_dfr(df_ls,
+#                        ~ .x %>%
+#                          select(project_id, results_dir, processed_files_sym) %>%
+#                          distinct()) %>%
+#       mutate(file_pattern =  "consensus_peaks.mLb.clN.featureCounts.txt$|consensus_peaks.mLb.clN.bed$")
+#   }
+# }) %>% 
+#   distinct()
+# 
+#   map_dfr(1:NROW(process_dirs), function(file_nb) {
+#     files <- list.files(
+#       process_dirs$results_dir[file_nb],
+#       pattern = process_dirs$file_pattern[file_nb],
+#       recursive = TRUE,
+#       full.names = TRUE
+#     ) %>% 
+#       enframe(value = "processed_file") %>% 
+#       select(-name) %>% 
+#       mutate(base_name_process = basename(processed_file),
+#              symlink_dir =  process_dirs$processed_files_sym[file_nb],
+#              symlink_process_file = str_c(symlink_dir, base_name_process, sep = "/"),
+#              project_id = process_dirs$project_id[file_nb]) 
+#   }) %>% 
+#   select(project_id, processed_file,symlink_process_file) %>% 
+#   filter(project_id == "PM22166") %>% 
+#   pull(processed_file)
+```
+
+```{r}
+processed_files <- list.files(processed_files_dir,
+           recursive = TRUE,
+           full.names = TRUE) %>%
+  set_names(dirname(.) %>%
+              basename()) %>% 
+  enframe(value = "processed_file", name = "project_id") 
+```
+
+```{r}
+processed_files <- imap(meta_data, function(meta_ls, seq_mode) {
+  imap_dfr(meta_ls, function(meta_df, projectID) {
+    processed_files %>%
+      filter(project_id == projectID) %>% 
+      mutate(sequencing_mode = seq_mode)
+  })
+})
+```
+
+```{r}
+sample_info
+```
+
+
+```{r}
+imap(processed_files, function(file_df, seq_mode) {
+  if (seq_mode == "RNA-seq") {
+    map(1:NROW(file_df), function(file_nb) {
+      filtered_file_locs <- here(filtered_processed_files_dir,
+                                 seq_mode,
+                                 file_df$project_id[file_nb])
+      generate_directories(filtered_file_locs)
+      met_dat <-
+        meta_data[[seq_mode]][[file_df$project_id[file_nb]]]
+
+      sample_col_names <- met_dat %>%
+        select(sample_name, sample_id) %>%
+        deframe()
+      read_tsv(file_df$processed_file[file_nb]) %>%
+        filter(!(gene_id %in% Ychr_genes$gene_id)) %>%
+        select(gene_id, `transcript_id(s)`, met_dat$sample_id) %>%
+        rename(!!!sample_col_names) %>%
+        write_tsv(here(filtered_file_locs,
+                       basename(file_df$processed_file[file_nb])))
+    })
+  } else if (seq_mode == "ChIP-seq") {
+    map(1:NROW(file_df), function(file_nb) {
+      filtered_file_locs <- here(filtered_processed_files_dir,
+                                 seq_mode,
+                                 file_df$project_id[file_nb])
+      generate_directories(filtered_file_locs)
+      if (str_detect(file_df$processed_file[file_nb], ".bed")) {
+        read_tsv(
+          file_df$processed_file[file_nb],
+          col_names = c(
+            "seqnames",
+            "start",
+            "end",
+            "interval_id",
+            "score",
+            "strand"
+          )
+        ) %>%
+          filter(seqnames != "Y") %>%
+          write_tsv(here(
+            filtered_file_locs,
+            basename(file_df$processed_file[file_nb])
+          ), col_names = FALSE)
+      } else if (str_detect(file_df$processed_file[file_nb], "featureCounts.txt")) {
+        read_tsv(file_df$processed_file[file_nb], comment = "#") %>%
+          filter(Chr != "Y") %>%
+          write_tsv(here(
+            filtered_file_locs,
+            basename(file_df$processed_file[file_nb])
+          ))
+      }
+    })
+
+  } else if (seq_mode == "ATAC-seq") {
+    map(1:NROW(file_df), function(file_nb) {
+      filtered_file_locs <- here(filtered_processed_files_dir,
+                                 seq_mode,
+                                 file_df$project_id[file_nb])
+      generate_directories(filtered_file_locs)
+      if (str_detect(file_df$processed_file[file_nb], ".xlsx")) {
+        file_df$processed_file[file_nb] %>% 
+          excel_sheets() %>% 
+          set_names() %>% 
+          map(read_excel, path = file_df$processed_file[file_nb]) %>% 
+          map(~.x %>% filter(seqnames != "Y")) %>% 
+          openxlsx::write.xlsx(file = here(
+            filtered_file_locs,
+            basename(file_df$processed_file[file_nb])
+          ))
+      } else if (str_detect(file_df$processed_file[file_nb], ".tsv")) {
+         read_tsv(file_df$processed_file[file_nb]) %>%
+          filter(seqnames != "Y") %>%
+        write_tsv(here(filtered_file_locs,
+                       basename(file_df$processed_file[file_nb])))
+      }
+      
+    })
+  }
+})
+```
+
