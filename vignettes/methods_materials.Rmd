@@ -1,0 +1,52 @@
+---
+title: "SC20054 - Transcriptomic signatures of iPSC-derived dopamine neurons"
+author: "Stephanie Strohbuecker"
+subtitle: Methods and Materials
+output:
+  word_document:
+    toc: no
+    toc_depth: '2'
+---
+
+
+# Material And Methods
+
+# Activity-by-Contact (ABC) algorithm
+
+Enhancer-gene connections were established using the Activity-by-Contact (ABC) model (Fulco et al. 2019) for the wildtype condition using the  information obtained from the ATAC-seq (PM19276, NRS_WT and PM21132, WT; --narrow_peak), the H3K27ac ChIP-seq (PM21134, WT; --broad) and RNA-seq (RN19275, NRS_WT). 
+ Each datatype was analysed as specified above.
+ ABC scores for each gene and chromatin accessible element within a 5Mb range were calculated.
+The ABC  model is run in three independent steps: Define candidate enhancer regions, quantify enhancer activity and compute ABC scores.
+For the required gene annotation, we selected one TSS for each gene. The TSS was selected based on the most highly expressed isoform (highest mean TPM expression across the three replicates in the RNA-seq). In cases in which several isoforms show equal expression levels, we selected the TSS that is used by the majority of isoforms. Lastly, for the remaining genes, i.e. those for which neither gene expression nor the majority vote identified a unique TSS, we selected the most 5' TSS. 
+We removed genes corresponding to small RNAs (gene symbol contains "MIR" or "RNU", genes with a gene body length < 300bp (we calculated the gene body length by summing across the exon widths of each transcipt)). Finally we removed very long RNAs with a gene body length larger than 2Mb. To generate the TSS annotation filem we selected 500bp surrounding the TSS for each gene. For the gene annotation file we collapsed each gene to its most expanded ranges.
+
+## Define candidate elements
+
+We re-run MACs with ABC algorithm-specific parameters (`-p 0.1 --call-summits TRUE`). Alternatively to the `makeCandidateRegions.py` script we used the Bioconductor package DiffBind (version 3.4.11, Ross-Innes et al. 2012).
+We analysed each replicate individually with MACS (REF) and removed elements overlapping regions of the genome that have been observed to accumulate anomaluos number of reads in epigenetic sequencing available via the ENCODE project (ENCODE Project Consortium, Luo et al. 2020) for GRCh37 with the following identifier `ENCSR636HFF`.
+Subsequently, reads were counted with DiffBind::dba.count(DBA, summits = 275, minOverlap=2) in the 1216037 consensus peaks identified by DiffBind. DiffBind takes the number of uniquely aligned reads to compute a normalised read count for each sample at every potential binding site. The peaks in the consensus peaks are re-centred and trimmed based on calculating their summits (point of greatest read overlap) in order to provide more standardized peak intervals. We used background normalisation. The candidate putative enhancer regions were then identified as those consensus peaks with the top 150000 activity (i.e. mean normalized read count). This approach utilises the available replicates without merging the available bam files. Finally we merged the candidate putative enhancer regions with the annotated TSS file region (“include-list”), as the ABC model considers promoters as part of the putative enhancer set.
+
+## Quantifying enhancer activity
+The candidate putative enhancer regions were then identified as those consensus peaks with the top 150000 activity (i.e. mean normalized read count). This approach utilises the available replicates without merging the available bam files. Finally we merged the candidate putative enhancer regions with the annotated TSS file region (“include-list”), as the ABC model considers promoters as part of the putative enhancer set.  The ABC algorithm comes with a set of ubiquitously expressed genes in human (hg19) that they curated for their paper. As we are using the Ensembl annotation the list of ubiquitously expressed gene symbols needs to be converted to ensembl gene ids (via BioMart).  Here we use the RNA expression as input into the `run.neighborhoods.py` step to define expressed genes.
+
+## Computing the ABC score
+
+ABC model without experimental contact data (approach used here) using the `predict.py`
+
+ R-3.6.2 (R Core Team, 2019)
+
+## References
+
+ENCODE Project Consortium. An integrated encyclopedia of DNA elements in the human genome. Nature. 2012 Sep 6;489(7414):57-74. doi: 10.1038/nature11247. PMID: 22955616; PMCID: PMC3439153.
+
+Fulco, C.P., Nasser, J., Jones, T.R. et al. Activity-by-contact model of enhancer–promoter regulation from thousands of CRISPR perturbations. Nat Genet 51, 1664–1669 (2019). https://doi.org/10.1038/s41588-019-0538-0
+
+Luo Y, Hitz BC, Gabdank I, Hilton JA, Kagda MS, Lam B, Myers Z, Sud P, Jou J, Lin K, Baymuradov UK, Graham K, Litton C, Miyasato SR, Strattan JS, Jolanki O, Lee JW, Tanaka FY, Adenekan P, O'Neill E, Cherry JM. New developments on the Encyclopedia of DNA Elements (ENCODE) data portal. Nucleic Acids Res. 2020 Jan 8;48(D1):D882-D889. doi: 10.1093/nar/gkz1062. PMID: 31713622; PMCID: PMC7061942.
+
+R Core Team (2019)
+R: A language and environment for statistical computing.
+R Foundation for Statistical Computing, Vienna, Austria.
+
+Ross-Innes, C. S., Stark, R., Teschendorff, A. E., Holmes, K. A., Ali, H. R., Dunning, M. J., Brown, G. D., Gojis, O., Ellis, I.
+O., Green, A. R., Ali, S., Chin, S.-F., Palmieri, C., Caldas, C., and Carroll, J. S. (2012). Differential oestrogen receptor
+binding is associated with clinical outcome in breast cancer. Nature 481, 389-393.

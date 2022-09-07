@@ -92,7 +92,8 @@ results_dir_locs <- c(
   "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/results/bwa/mergedLibrary/macs/broadPeak",
   "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/results/bwa/mergedLibrary/macs",
   "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/results/bwa/mergedLibrary/macs",
-  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/results/bwa/mergedLibrary/macs"
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/results/bwa/mergedLibrary/macs",
+  "RN19229" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA_RN19229/star_rsem"
 ) %>%
   enframe(name = "project_id", value = "results_dir")
 ```

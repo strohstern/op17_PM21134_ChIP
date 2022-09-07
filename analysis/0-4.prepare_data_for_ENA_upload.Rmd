@@ -78,7 +78,7 @@ sample_info <-
     "data",
     "raw_data",
     "project_docs",
-    "samples_for_data_upload_vs12-08-2022.xlsx"
+    "samples_for_data_upload_vs06-09-2022.xlsx"
   )) %>% 
   select(project_id, sample_id, sequencing_type, sequencing_mode, flowcell)
 
@@ -135,7 +135,8 @@ design_file_locs <- c(
   "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/design.csv",
   "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/sr-design.csv",
   "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/design.csv",
-  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/design.csv"
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP/design.csv",
+  "RN19229" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/raw_data/project_docs/RN19229_design_adj.csv"
 ) %>%
   enframe(name = "project_id", value = "design_file_loc")
 ```
@@ -150,7 +151,8 @@ results_dir_locs <- c(
   "PM22148" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op273-PM22148/results",
   "PM22149" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op274-PM22149/results",
   "PM22166" = "/camp/stp/babs/working/goldstr2/projects/guillemotf/oana.paun/op288-PM22166-ASCL1/results",
-  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP"
+  "PM21134" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_ChIP",
+  "RN19229" = "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/nfcore_RNA_RN19229/star_rsem"
 ) %>%
   enframe(name = "project_id", value = "results_dir")
 ```
@@ -161,7 +163,7 @@ design_file_locs <- full_join(design_file_locs, results_dir_locs, by = "project_
 
 ```{r}
 # design_file_locs <- design_file_locs %>%
-#   filter(project_id != "RN19275")
+  # filter(project_id %in% c("RN19229"))
 ```
 
 ```{r}
@@ -198,7 +200,7 @@ meta_data <-
       } else {
         left_join(., bam_files_loc, by = "sample_name")
       }
-    }  %>% 
+    }  %>%
     mutate(new_bam_file_name = str_c(bam_links_dir, basename(bam_file_loc), sep = "/"))
   })
 ```
