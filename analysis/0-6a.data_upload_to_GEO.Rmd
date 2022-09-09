@@ -1,0 +1,269 @@
+---
+title: "PM21134 - ChIP of SWI/SNF and ASCL1"
+subtitle: "Data upload to GEO"
+author: "Stephanie Strohbuecker"
+output:
+  html_document:
+    df_print: paged
+---
+
+Prepare metadata and files for upload to GEO.
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      eval.after = "fig.cap",
+                      fig.width = 12)
+```
+
+Investigator: Oana Paun
+PI:Francois Guillemot
+
+After having prepared the initial metadata information (`0-6.data_upload_to_GEO`), Oana Paun checked the information and corrected information. For this final preparation of the metadata we use the information provided by Oana.
+
+```{r}
+RMD_file_name <- "0-6a.data_upload_to_GEO"
+```
+
+```{r message=FALSE, warning=FALSE}
+## Libraries
+library(tidyverse)
+library(here)
+
+library(readxl)
+```
+
+```{r message=FALSE, warning=FALSE}
+# load_all() makes the functions in the R/ directory available for usage
+pkgload::load_all()
+```
+
+```{r}
+# Path to output and figures directories
+sample_info_path <-
+    here(
+      "data",
+      "raw_data",
+      "project_docs",
+      "GEO_upload_all_samples_vs06-09-2022.xlsx"
+    )
+
+sample_info <- sample_info_path %>% 
+  excel_sheets() %>% 
+  set_names() %>% 
+  map(read_excel, path = sample_info_path)
+
+GEO_dirs <-
+  str_c(here("data", "derived_data", "GEO"),
+        names(sample_info),
+        sep = "/") %>%
+  set_names(names(sample_info))
+
+walk(GEO_dirs, ~ generate_directories(.x))
+```
+
+```{r}
+iwalk(GEO_dirs, ~ file.copy(
+  here("data", "raw_data", "project_docs", "GEO_seq_template-1.xlsx"),
+  str_c(.x, str_c(.y, "GEO_seq_template-1.xlsx", sep = "_"), sep = "/")
+))
+```   
+
+```{r}
+fastq_dirs <-
+  here(
+    "data",
+    "derived_data",
+    "Tables",
+    "0-4.prepare_data_for_ENA_upload",
+    "filtered_fastq"
+  )
+
+
+fastq_info <- list.files(
+  fastq_dirs,
+  pattern = "fastq.gz",
+  recursive = TRUE,
+  full.names = TRUE
+) %>%
+  set_names(str_remove(basename(.), "_lane\\d.*.gz$")) %>%
+  enframe(name = "sample_name", value = "fastq_loc") %>%
+  mutate(project_id = dirname(fastq_loc) %>% basename())
+
+sample_info <-
+  map(sample_info, ~ left_join(.x, fastq_info, by = c("library name" ="sample_name" )))
+```
+
+```{r, eval=FALSE}
+# move fastq files in correct directory
+imap(sample_info, function(proj_list, seq_mode) {
+  
+  fastq_locs <- proj_list %>% 
+    select(fastq_loc) %>%
+    mutate(fastq_name = basename(fastq_loc)) %>%
+    relocate(fastq_name) %>%
+    deframe()
+  
+  imap(fastq_locs, ~ file.rename(.x, here(GEO_dirs[[seq_mode]], .y)))
+})
+```
+
+```{r}
+fastq_files <- list.files(GEO_dirs, recursive = TRUE, pattern = "fastq.gz", full.names = FALSE) %>% 
+  set_names(str_remove(basename(.), "_lane.*.fastq.gz$")) %>% 
+  enframe(name = "lib_name", value = "fastq_loc")
+
+sample_info <- map(sample_info, ~.x %>% 
+      select(-fastq_loc, -project_id) %>% 
+      left_join(fastq_files, by = c("library name" = "lib_name")))
+```
+
+
+```{r}
+imap(sample_info, function(proj_list, seq_mode) {
+  proj_list %>%
+    rename_with(~ str_replace_all(., " ", "_")) %>% 
+    arrange(fastq_loc) %>% 
+    group_by(library_name) %>%
+    mutate(
+      fastq_loc = basename(fastq_loc),
+      raw_file = str_c("raw_file", rep(1:n()), sep = "_")) %>%
+    pivot_wider(names_from = raw_file, values_from = fastq_loc) %>%
+    arrange(library_name) %>%
+    write_csv( here(GEO_dirs[[seq_mode]], "sample_info.csv"))
+})
+```
+
+
+# Processed files
+
+```{r}
+process_files <- list.files(
+  here(
+    "data",
+    "derived_data",
+    "Tables",
+    "0-5.prepare_processed_data_for_GEO_upload",
+    "filtered_processed_files"
+  ),
+  recursive = TRUE,
+  full.names = TRUE
+) %>% 
+  set_names(basename(.)) %>% 
+  enframe(name = "file_name", value = "full_path") %>% 
+  mutate(seq_mode = dirname(full_path) %>% dirname() %>% basename()) %>% 
+  group_by(seq_mode) %>% 
+  group_split() %>% 
+  set_names(map(., ~ unique(.x$seq_mode) %>% str_remove_all("-")))
+```
+
+```{r}
+imap(process_files, function(file_df, seq_mode) {
+  if (seq_mode == "RNAseq") {
+    map(file_df$full_path, ~ read_tsv(.x)) %>%
+      purrr::reduce(full_join, by = c("gene_id", "transcript_id(s)")) %>%
+      select(gene_id, "transcript_id(s)", sample_info[[seq_mode]]$`library name`) %>%
+      write_tsv(here(GEO_dirs[[seq_mode]], "rsem.merged.gene_counts.tsv"))
+  } else if (seq_mode == "ChIPseq") {
+    file_df <- file_df %>%
+      filter(!str_detect(file_name, "SMARCC1")) %>%
+      mutate(
+        project_id = dirname(full_path) %>%  basename(),
+        file_name = case_when(
+          project_id == "PM22166" ~ str_c("day20", file_name, sep = "_"),
+          project_id != "DN19154" &
+            str_detect(file_name, "SMARCB1") ~ NA_character_,
+          TRUE ~ file_name
+        )
+      ) %>%
+      filter(!is.na(file_name)) %>%
+      mutate(file_type = str_remove(file_name, ".*\\.")) %>%
+      group_by(file_type) %>%
+      group_split() %>%
+      set_names(map(., ~ unique(.x$file_type)))
+    imap(file_df, function(files_info, file_type) {
+      if (file_type == "bed") {
+        files_locs <- files_info %>%
+          select(file_name, full_path) %>%
+          deframe()
+        imap(files_locs, ~ file.rename(.x, here(GEO_dirs[[seq_mode]], .y)))
+      } else if (file_type == "txt") {
+        sample_names_ext <-
+          str_c(sample_info[[seq_mode]]$`library name`, ".mLb.clN.sorted.bam")
+        map(1:NROW(files_info), ~
+           read_tsv(files_info$full_path[.x]) %>%
+            select(
+              Geneid,
+              Chr,
+              Start,
+              End,
+              Strand,
+              Length,
+              any_of(sample_names_ext)
+            ) %>%
+            write_tsv(here(GEO_dirs[[seq_mode]], files_info$file_name[.x]))
+        )
+      }
+    })
+  } else if (seq_mode == "ATACseq") {
+    file_df <- file_df %>%
+      mutate(
+        project_id = dirname(full_path) %>%  basename(),
+        file_name = case_when(project_id == "PM19276" ~ file_name,
+                              TRUE ~ NA_character_)
+      ) %>%
+      filter(!is.na(file_name)) %>%
+      mutate(file_type = str_remove(file_name, ".*\\.")) %>%
+      group_by(file_type) %>%
+      group_split() %>%
+      set_names(map(., ~ unique(.x$file_type)))
+    imap(file_df, function(files_info, file_type) {
+      if (file_type == "bed") {
+        files_locs <- files_info %>%
+          select(file_name, full_path) %>%
+          deframe()
+        imap(files_locs, ~ file.rename(.x, here(GEO_dirs[[seq_mode]], .y)))
+      } else if (file_type == "txt") {
+        sample_names_ext <-
+          str_c(sample_info[[seq_mode]]$`library name`, ".mLb.clN.sorted.bam")
+        map(
+          files_info$full_path,
+          ~ read_tsv(.x) %>%
+            select(
+              Geneid,
+              Chr,
+              Start,
+              End,
+              Strand,
+              Length,
+              any_of(sample_names_ext)
+            ) %>%
+            write_tsv(here(GEO_dirs[[seq_mode]], files_info$file_name))
+        )
+      }
+    })
+  }
+})
+```
+
+```{r}
+map(GEO_dirs,
+    ~ list.files(.x, pattern = ".tsv$|.bed$|.txt$", full.names = TRUE)) %>%
+  reduce(c) %>%
+  map( ~ {
+    bash_cmd <- str_c("gzip", .x, sep = " ")
+    bash_cmd
+    system(bash_cmd)
+  })
+```
+
+```{r}
+map(GEO_dirs, ~ {
+  bash_cmd <-
+    str_c("md5sum ",  .x, "/*.gz > ", .x, "/md5sum_info.txt", sep = "")
+  bash_cmd
+  system(bash_cmd)
+})
+```
+
+
+
+

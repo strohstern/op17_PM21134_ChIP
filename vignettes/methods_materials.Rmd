@@ -13,33 +13,34 @@ output:
 
 # Activity-by-Contact (ABC) algorithm
 
-Enhancer-gene connections were established using the Activity-by-Contact (ABC) model (Fulco et al. 2019) for the wildtype condition using the  information obtained from the ATAC-seq (PM19276, NRS_WT and PM21132, WT; --narrow_peak), the H3K27ac ChIP-seq (PM21134, WT; --broad) and RNA-seq (RN19275, NRS_WT). 
- Each datatype was analysed as specified above.
- ABC scores for each gene and chromatin accessible element within a 5Mb range were calculated.
-The ABC  model is run in three independent steps: Define candidate enhancer regions, quantify enhancer activity and compute ABC scores.
-For the required gene annotation, we selected one TSS for each gene. The TSS was selected based on the most highly expressed isoform (highest mean TPM expression across the three replicates in the RNA-seq). In cases in which several isoforms show equal expression levels, we selected the TSS that is used by the majority of isoforms. Lastly, for the remaining genes, i.e. those for which neither gene expression nor the majority vote identified a unique TSS, we selected the most 5' TSS. 
-We removed genes corresponding to small RNAs (gene symbol contains "MIR" or "RNU", genes with a gene body length < 300bp (we calculated the gene body length by summing across the exon widths of each transcipt)). Finally we removed very long RNAs with a gene body length larger than 2Mb. To generate the TSS annotation filem we selected 500bp surrounding the TSS for each gene. For the gene annotation file we collapsed each gene to its most expanded ranges.
+Enhancer-gene connections were established using the Activity-by-Contact (ABC) model (Fulco et al. 2019) for the wildtype condition using the  information obtained from the ATAC-seq (PM19276, NRS_WT and PM21132, WT; --narrow_peak), the H3K27ac ChIP-seq (PM21134, WT; --broad) and RNA-seq (RN19275, NRS_WT). Each datatype was analysed as specified above.
+ABC scores for each gene and chromatin accessible element within a 5Mb range were calculated.
+To generate the neccessary gene and TSS annotation files we used the GRCh37.75 annotation in R-3.6.2 (R Core Team, 2019) and the Bioconductor package plyranges (version 1.14.0, Lee et al. 2019).
+Transcription start sites (TSS) for each gene were selected based on the most highly expressed isoform (highest mean TPM expression across the three replicates in the RNA-seq). In cases in which several isoforms show equal expression levels, we selected the TSS that is used by the majority of isoforms. Lastly, for the remaining genes, i.e. those for which neither gene expression nor the majority vote identified a unique TSS, we selected the most 5' TSS. The TSS region was then defined as the 500bp surrounding each gene's TSS.
+We removed genes corresponding to small RNAs (gene symbol contains "MIR" or "RNU", genes with a gene body length < 300bp (we calculated the gene body length by summing across the exon widths of each transcript)). For the gene annotation each gene was collapsed its most expanded genomic ranges.
 
 ## Define candidate elements
 
-We re-run MACs with ABC algorithm-specific parameters (`-p 0.1 --call-summits TRUE`). Alternatively to the `makeCandidateRegions.py` script we used the Bioconductor package DiffBind (version 3.4.11, Ross-Innes et al. 2012).
-We analysed each replicate individually with MACS (REF) and removed elements overlapping regions of the genome that have been observed to accumulate anomaluos number of reads in epigenetic sequencing available via the ENCODE project (ENCODE Project Consortium, Luo et al. 2020) for GRCh37 with the following identifier `ENCSR636HFF`.
-Subsequently, reads were counted with DiffBind::dba.count(DBA, summits = 275, minOverlap=2) in the 1216037 consensus peaks identified by DiffBind. DiffBind takes the number of uniquely aligned reads to compute a normalised read count for each sample at every potential binding site. The peaks in the consensus peaks are re-centred and trimmed based on calculating their summits (point of greatest read overlap) in order to provide more standardized peak intervals. We used background normalisation. The candidate putative enhancer regions were then identified as those consensus peaks with the top 150000 activity (i.e. mean normalized read count). This approach utilises the available replicates without merging the available bam files. Finally we merged the candidate putative enhancer regions with the annotated TSS file region (“include-list”), as the ABC model considers promoters as part of the putative enhancer set.
+Alternatively to the `makeCandidateRegions.py` script we used the Bioconductor package DiffBind (version 3.4.11, Ross-Innes et al. 2012).
+We run MACS (Zhang et al. 2008) for each replicte using the ABC algorithm-specific parameters (`-p 0.1 --call-summits TRUE`) and removed elements overlapping regions of the genome that have been observed to accumulate anomaluos number of reads in epigenetic sequencing available via the ENCODE project (ENCODE Project Consortium, Luo et al. 2020) for GRCh37 with the following identifier `ENCSR636HFF`. 
+Subsequently, reads were counted with DiffBind::dba.count(DBA, summits = 275, minOverlap=2) in the consensus peaks identified with DiffBind. Peaks in the consensus peak set were re-centered and trimmed based on their points of greatest read overlap (summits) to provide more standardized peak intervals. After background normalisation, candidate putative enhancer regions were identified as those 150000 consensus peaks with the highest mean normalized read count. Finally we merged the candidate putative enhancer regions with the annotated TSS file region (“include-list”), as the ABC model considers promoters as part of the putative enhancer set.
 
 ## Quantifying enhancer activity
-The candidate putative enhancer regions were then identified as those consensus peaks with the top 150000 activity (i.e. mean normalized read count). This approach utilises the available replicates without merging the available bam files. Finally we merged the candidate putative enhancer regions with the annotated TSS file region (“include-list”), as the ABC model considers promoters as part of the putative enhancer set.  The ABC algorithm comes with a set of ubiquitously expressed genes in human (hg19) that they curated for their paper. As we are using the Ensembl annotation the list of ubiquitously expressed gene symbols needs to be converted to ensembl gene ids (via BioMart).  Here we use the RNA expression as input into the `run.neighborhoods.py` step to define expressed genes.
+
+The activity of the putative enhancer regions was then quantified using the `run.neighborhoods.py` function from the ABC algorithm including the information for the RNA-sequencing to define expressed genes.
 
 ## Computing the ABC score
 
-ABC model without experimental contact data (approach used here) using the `predict.py`
+Finally, ABC scores were calculated using the `predict.py` without experimental contact data information (using the following parameters: --score_column powerlaw.Score --threshold .022 --make_all_putative).
 
- R-3.6.2 (R Core Team, 2019)
 
 ## References
 
 ENCODE Project Consortium. An integrated encyclopedia of DNA elements in the human genome. Nature. 2012 Sep 6;489(7414):57-74. doi: 10.1038/nature11247. PMID: 22955616; PMCID: PMC3439153.
 
 Fulco, C.P., Nasser, J., Jones, T.R. et al. Activity-by-contact model of enhancer–promoter regulation from thousands of CRISPR perturbations. Nat Genet 51, 1664–1669 (2019). https://doi.org/10.1038/s41588-019-0538-0
+
+Lee, Stuart, Dianne Cook, and Michael Lawrence. 2019. “Plyranges: A Grammar of Genomic Data Transformation.” Genome Biology 20 (1):4. https://doi.org/10.1186/s13059-018-1597-8.
 
 Luo Y, Hitz BC, Gabdank I, Hilton JA, Kagda MS, Lam B, Myers Z, Sud P, Jou J, Lin K, Baymuradov UK, Graham K, Litton C, Miyasato SR, Strattan JS, Jolanki O, Lee JW, Tanaka FY, Adenekan P, O'Neill E, Cherry JM. New developments on the Encyclopedia of DNA Elements (ENCODE) data portal. Nucleic Acids Res. 2020 Jan 8;48(D1):D882-D889. doi: 10.1093/nar/gkz1062. PMID: 31713622; PMCID: PMC7061942.
 
@@ -50,3 +51,5 @@ R Foundation for Statistical Computing, Vienna, Austria.
 Ross-Innes, C. S., Stark, R., Teschendorff, A. E., Holmes, K. A., Ali, H. R., Dunning, M. J., Brown, G. D., Gojis, O., Ellis, I.
 O., Green, A. R., Ali, S., Chin, S.-F., Palmieri, C., Caldas, C., and Carroll, J. S. (2012). Differential oestrogen receptor
 binding is associated with clinical outcome in breast cancer. Nature 481, 389-393.
+
+Zhang Y, Liu T, Meyer CA, Eeckhoute J, Johnson DS, Bernstein BE, Nusbaum C, Myers RM, Brown M, Li W, Liu XS. Model-based analysis of ChIP-Seq (MACS). Genome Biol. 2008;9(9):R137. doi: 10.1186/gb-2008-9-9-r137. Epub 2008 Sep 17. PubMed PMID: 18798982; PubMed Central PMCID: PMC2592715

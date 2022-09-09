@@ -18,7 +18,7 @@ Investigator: Oana Paun
 PI:Francois Guillemot
 
 ```{r}
-RMD_file_name <- "0-5.data_upload_to_GEO"
+RMD_file_name <- "0-6.data_upload_to_GEO"
 ```
 
 ```{r message=FALSE, warning=FALSE}
