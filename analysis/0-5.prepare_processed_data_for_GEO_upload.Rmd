@@ -349,3 +349,24 @@ imap(processed_files, function(file_df, seq_mode) {
 
 ```
 
+
+Addendum: Adjust missing file
+```{r}
+read_tsv(
+  "/camp/stp/babs/inputs/guillemotf/oana.paun/stephanie.strohbuecker/op17_PM21134_ChIP_SWI_SNFxASCL1/DN19154/SMARCB1.consensus_peaks.featureCounts.txt",
+  comment = "#"
+) %>%
+  select(
+    Geneid,
+    Chr,
+    Start,
+    End,
+    contains("SMARCB1_IP_ASCL1KO_KOLF2"),
+    contains("SMARCB1_IP_KOLF2")
+  ) %>%
+  filter(Chr != "chrY") %>%
+  write_tsv(
+    "/camp/stp/babs/working/strohbs/projects/guillemotf/oana.paun/op17_PM21134_ChIP_SWI_SNFxASCL1/data/derived_data/GEO/ChIPseq/SMARCB1.consensus_peaks.featureCounts.txt"
+  )
+```
+
